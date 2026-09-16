@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Verbatim copy of the production client's src/styles/index.css. */
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-[#f4f7fb] text-ink font-sans antialiased;
+  }
+  /* thin, unobtrusive scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-line rounded-xl2 shadow-card;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 border border-line bg-white text-slate-700
+      rounded-[11px] px-3.5 py-2.5 text-xs font-bold shadow-sm transition
+      hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply border-0 text-white bg-gradient-to-br from-brand to-brand-2 shadow-brand hover:brightness-105;
+  }
+  .btn-soft {
+    @apply bg-[#f1f0ff] text-[#5145cd] border-[#ddd9ff] hover:bg-[#e9e7ff];
+  }
+  .btn-danger {
+    @apply text-danger bg-[#fff6f6] border-[#ffd8d8] hover:bg-[#ffeeee];
+  }
+  .btn-xs {
+    @apply px-2.5 py-1.5 text-[11px] rounded-lg;
+  }
+
+  /* Form controls */
+  .input,
+  .select,
+  .textarea {
+    @apply w-full border border-line rounded-[10px] px-3 py-2.5 text-sm bg-white text-ink
+      outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20;
+  }
+  .field-label {
+    @apply block text-[10px] font-extrabold uppercase tracking-[.06em] text-muted mb-1.5;
+  }
+
+  /* Tags / pills */
+  .tag {
+    @apply inline-flex items-center px-2 py-1 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-600 whitespace-nowrap;
+  }
+  .tag-green {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+  .tag-amber {
+    @apply bg-orange-100 text-orange-700;
+  }
+  .tag-red {
+    @apply bg-red-100 text-red-700;
+  }
+  .tag-purple {
+    @apply bg-violet-100 text-violet-700;
+  }
+  .tag-blue {
+    @apply bg-blue-100 text-blue-700;
+  }
+
+  /* Tables */
+  .tbl {
+    @apply w-full border-collapse;
+  }
+  .tbl th {
+    @apply text-left px-3 py-2.5 text-[9px] uppercase tracking-[.08em] text-muted border-b border-line font-bold;
+  }
+  .tbl td {
+    @apply px-3 py-3 text-[11.5px] border-b border-[#edf1f5] align-middle;
+  }
+  .tbl tbody tr:hover {
+    @apply bg-slate-50/70;
+  }
+
+  .section-title {
+    @apply flex items-center justify-between gap-2 flex-wrap mb-3.5;
+  }
+  .section-title h2 {
+    @apply text-[15px] font-semibold m-0;
+  }
+  .section-title span {
+    @apply text-[11px] text-muted;
+  }
+
+  .empty {
+    @apply py-7 text-center text-muted text-xs;
+  }
+}
