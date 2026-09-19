@@ -18,7 +18,6 @@ export default function BorrowerPage() {
           doc
             ? [
                 `Loan ${r.loanId || doc.loanId || '—'}`,
-                doc.refId ? `Ref ${doc.refId}` : null,
                 r.district ? `${r.district}${r.state ? ', ' + r.state : ''}` : null,
               ]
                 .filter(Boolean)

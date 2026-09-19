@@ -13,7 +13,7 @@ function initials(name) {
 }
 
 export default function StaffShell({ children }) {
-  const { section, setSection, organizations } = useStaff();
+  const { section, setSection, setViewOrgId, organizations } = useStaff();
 
   const activeLabel = STAFF_NAV.find((n) => n.key === section)?.label || 'Staff';
   const pendingOnboarding = organizations.filter((o) => o.onboarding && o.onboarding.password_status === 'temporary').length;
@@ -35,16 +35,26 @@ export default function StaffShell({ children }) {
           {STAFF_NAV.map((item) => (
             <button
               key={item.key}
-              onClick={() => setSection(item.key)}
+              onClick={() => {
+                if (item.soon) return;
+                setViewOrgId(null);
+                setSection(item.key);
+              }}
+              disabled={item.soon}
               className={cx(
                 'flex w-full items-center gap-3 rounded-[11px] px-3 py-2.5 text-left text-[13px] font-semibold transition',
                 section === item.key
                   ? 'bg-gradient-to-r from-amber-400/25 to-orange-500/10 text-white shadow-[inset_3px_0_0_#f59e0b]'
-                  : 'text-[#b8ab99] hover:bg-[#211c17] hover:text-white'
+                  : item.soon
+                    ? 'cursor-default text-[#5f5548]'
+                    : 'text-[#b8ab99] hover:bg-[#211c17] hover:text-white'
               )}
             >
               <span className="w-5 text-center text-base">{item.icon}</span>
-              <span className="max-[860px]:hidden">{item.label}</span>
+              <span className="max-[860px]:hidden">
+                {item.label}
+                {item.soon && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[#5f5548]">soon</span>}
+              </span>
               {item.key === 'organizations' && pendingOnboarding > 0 && (
                 <span className="ml-auto rounded-full bg-amber-400 px-1.5 text-[10px] font-extrabold text-amber-950 max-[860px]:hidden">
                   {pendingOnboarding}
@@ -73,11 +83,6 @@ export default function StaffShell({ children }) {
             Saralya staff / <b className="text-ink">{activeLabel}</b>
           </div>
           <div className="flex items-center gap-2.5">
-            {section !== 'onboard' && (
-              <Button variant="primary" onClick={() => setSection('onboard')}>
-                ＋ Onboard organization
-              </Button>
-            )}
             <Button variant="danger" className="whitespace-nowrap">Logout</Button>
           </div>
         </header>

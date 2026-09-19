@@ -15,6 +15,8 @@ import {
   IVR_OPTION_BY_KEY,
   IVR_CALL_OUTCOMES,
   IVR_OPTIONS,
+  IVR_SCRIPTS,
+  dpdBucket,
 } from './lib.js';
 
 /* ------------------------------------------------------------------ account */
@@ -38,35 +40,6 @@ export const PROJECTS = [
 ];
 export const ACTIVE_PROJECT_ID = 'prj_main';
 
-/* ------------------------------------------------------- portfolio / uploads */
-export const UPLOADS = [
-  { _id: 'up_5', fileName: 'collections_book_aug2026.xlsx', totalRecords: 8421, createdAt: '2026-09-05T06:30:00Z' },
-  { _id: 'up_4', fileName: 'collections_book_jul2026.xlsx', totalRecords: 8102, createdAt: '2026-08-03T06:30:00Z' },
-  { _id: 'up_3', fileName: 'collections_book_jun2026.xlsx', totalRecords: 7788, createdAt: '2026-07-02T06:30:00Z' },
-  { _id: 'up_2', fileName: 'collections_book_may2026.xlsx', totalRecords: 7540, createdAt: '2026-06-04T06:30:00Z' },
-  { _id: 'up_1', fileName: 'initial_import.xlsx', totalRecords: 6980, createdAt: '2026-05-06T06:30:00Z' },
-];
-export const LATEST_UPLOAD = UPLOADS[0];
-
-// Per-category counts for the 2×2 grid + KPIs.
-const CATEGORY_COUNTS = {
-  oops: { count: 2680, outstanding: 41_20_00_00 },
-  wilful_defaulter: { count: 1240, outstanding: 96_40_00_00 },
-  cashflow_crunch: { count: 2960, outstanding: 58_70_00_00 },
-  lost_cause: { count: 1420, outstanding: 74_10_00_00 },
-};
-
-export const BORROWER_COUNTS = {
-  total: Object.values(CATEGORY_COUNTS).reduce((s, c) => s + c.count, 0),
-  pending: 46, // scored but IVR-unreachable — held out of the grid
-  categories: CATEGORIES.map((c) => ({
-    key: c.key,
-    label: c.label,
-    count: CATEGORY_COUNTS[c.key].count,
-    outstanding: CATEGORY_COUNTS[c.key].outstanding,
-  })),
-};
-
 export const PORTFOLIO_STATES = ['Bihar', 'Uttar Pradesh', 'Maharashtra', 'Rajasthan', 'Madhya Pradesh', 'Karnataka', 'West Bengal'];
 
 export const PRODUCTS = ['Personal Loan', 'Two-wheeler Loan', 'Business Loan', 'Gold Loan', 'Consumer Durable'];
@@ -87,6 +60,37 @@ const REF_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const BANKS = ['HDFC Bank', 'SBI', 'ICICI Bank', 'Axis Bank', 'Bank of Baroda', 'Kotak', 'Canara Bank'];
 const EMPLOYERS = ['Reliance Retail', 'Self-employed — kirana', 'Tata Motors', 'Local contractor', 'Amazon India', 'State transport dept', 'Zomato (gig)', 'Textile unit'];
 const UPI_HANDLES = ['okhdfcbank', 'ybl', 'okaxis', 'paytm', 'oksbi'];
+const VILLAGES = ['Rampur', 'Sultanpur', 'Ganeshpur', 'Krishnanagar', 'Shivpuri', 'Anandpur', 'Devipur', 'Lakshmipur', 'Govindpur', 'Narayanpur', 'Maheshpur', 'Chandpur'];
+const STATE_PIN_PREFIX = {
+  Bihar: '80',
+  'Uttar Pradesh': '22',
+  Maharashtra: '41',
+  Rajasthan: '30',
+  'Madhya Pradesh': '45',
+  Karnataka: '56',
+  'West Bengal': '71',
+};
+const PURPOSES = {
+  'Income generation': ['Kirana shop stock', 'Tailoring unit', 'Dairy — cattle purchase', 'Vegetable vending cart'],
+  Consumption: ['Home repair', 'Medical expense', 'Education fee', 'Wedding expense'],
+  Agriculture: ['Crop input purchase', 'Irrigation pump', 'Farm equipment'],
+};
+const PURPOSE_KEYS = Object.keys(PURPOSES);
+const LENDER_BRANCHES = ['SGM-BR-01', 'SGM-BR-02', 'SGM-BR-03', 'SGM-BR-04'];
+const NOMINEE_RELATIONS = ['Spouse', 'Son', 'Daughter', 'Father', 'Mother', 'Brother'];
+const REPAYMENT_FREQUENCIES = ['Monthly', 'Monthly', 'Monthly', 'Fortnightly', 'Weekly'];
+const PAN_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function fakePan(i, n) {
+  const s = (k) => seeded(i * 13 + n + k);
+  let str = '';
+  for (let k = 0; k < 5; k++) str += PAN_LETTERS[Math.floor(s(k) * 26)];
+  str += String(1000 + Math.floor(s(5) * 9000));
+  str += PAN_LETTERS[Math.floor(s(6) * 26)];
+  return str;
+}
+function fakeAadhaar(i, n) {
+  return `XXXX XXXX ${String(1000 + Math.floor(seeded(i * 13 + n) * 9000))}`;
+}
 
 function seeded(i) {
   // deterministic pseudo-random so the list is stable across reloads
@@ -141,6 +145,24 @@ function makeBorrower(i) {
   const disbMonth = 1 + Math.floor(r(22) * 22); // months before Sep 2026
   const disbDate = new Date(2026, 8, 12);
   disbDate.setMonth(disbDate.getMonth() - disbMonth);
+  // TOTAL_INSTALLMENT / OUTSTANDING_INSTALLMENT come from the loan schedule;
+  // PAID_INSTALLMENT isn't always in the import, so it's derived when absent.
+  const totalInstallment = 12 + Math.floor(r(60) * 24);
+  const outstandingInstallment = Math.min(totalInstallment, Math.max(0, Math.round((outstanding / principal) * totalInstallment)));
+  const paidInstallment = totalInstallment - outstandingInstallment;
+  // LAST_COLL_DATE — recency of the last payment, biased but not tied to
+  // odDays, so it can genuinely agree or disagree with the other signals.
+  const daysSinceLastColl = odDays === 0 ? Math.floor(5 + r(61) * 20) : Math.floor(10 + r(61) * 150);
+  const lastCollDateObj = new Date(2026, 8, 17);
+  lastCollDateObj.setDate(lastCollDateObj.getDate() - daysSinceLastColl);
+  const lastCollDate = lastCollDateObj.toISOString().slice(0, 10);
+  // LAST_CONTACT_DATE — recency of the last outreach attempt, drawn
+  // independently of the collection date so a borrower can be current on
+  // contact but not on payment, or vice versa.
+  const daysSinceLastContact = Math.floor(3 + r(62) * 60);
+  const lastContactDateObj = new Date(2026, 8, 17);
+  lastContactDateObj.setDate(lastContactDateObj.getDate() - daysSinceLastContact);
+  const lastContactDate = lastContactDateObj.toISOString().slice(0, 10);
   const hasPan = r(15) > 0.11;
   const bureauPulled = hasPan && r(16) > 0.44;
   const hasCoApplicant = r(18) > 0.38;
@@ -153,11 +175,99 @@ function makeBorrower(i) {
   const bankVerified = r(25) > (bureauPulled ? 0.28 : 0.55);
   const employerFound = r(27) > 0.42;
   const addressResolved = r(28) > 0.52;
+
+  const firstName = pick(FIRST, r(7));
+  const lastName = pick(LAST, r(8));
+  const status = odDays === 0 ? 'Current' : odDays > 90 ? 'NPA' : 'Overdue';
+  const odBucket = odDays === 0 ? 'Current' : dpdBucket(odDays);
+
+  // ---- applicant personal details --------------------------------------
+  const gender = r(80) > 0.45 ? 'Male' : 'Female';
+  const age = 21 + Math.floor(r(81) * 40); // 21–60
+  const dobObj = new Date(2026, 8, 17);
+  dobObj.setFullYear(dobObj.getFullYear() - age);
+  dobObj.setMonth(Math.floor(r(82) * 12), 1 + Math.floor(r(83) * 27));
+  const dob = dobObj.toISOString().slice(0, 10);
+  const applicantPan = hasPan ? fakePan(i, 90) : null;
+  const applicantAadhaar = r(84) > 0.12 ? fakeAadhaar(i, 100) : null;
+  const aadhaarStatus = applicantAadhaar ? 'Verified' : 'Not available';
+  const spouseName = r(85) > 0.22 ? `${pick(FIRST, r(86))} ${lastName}` : null;
+  const fatherName = `${pick(FIRST, r(87))} ${lastName}`;
+
+  // ---- co-applicant ------------------------------------------------------
+  const coApplicantName = hasCoApplicant ? `${pick(FIRST, r(88))} ${lastName}` : null;
+  const coApplicantMobile = hasCoApplicant ? '9' + String(800000000 + Math.floor(r(89) * 199999999)) : null;
+  const coApplicantPan = hasCoApplicant && r(31) > 0.35 ? fakePan(i, 110) : null;
+
+  // ---- nominee -------------------------------------------------------------
+  const hasNominee = r(91) > 0.1;
+  const nomineeRelation = hasNominee ? pick(NOMINEE_RELATIONS, r(92)) : null;
+  const nomineeIsChild = nomineeRelation === 'Son' || nomineeRelation === 'Daughter';
+  const nomineeAge = hasNominee ? (nomineeIsChild ? 2 + Math.floor(r(93) * 20) : 25 + Math.floor(r(93) * 45)) : null;
+  let nomineeDob = null;
+  if (hasNominee) {
+    const nomineeDobObj = new Date(2026, 8, 17);
+    nomineeDobObj.setFullYear(nomineeDobObj.getFullYear() - nomineeAge);
+    nomineeDob = nomineeDobObj.toISOString().slice(0, 10);
+  }
+  const nomineeName = hasNominee ? `${pick(FIRST, r(94))} ${lastName}` : null;
+
+  // ---- location ------------------------------------------------------------
+  const villageName = pick(VILLAGES, r(95));
+  const pincode = (STATE_PIN_PREFIX[state] || '10') + String(1000 + Math.floor(r(96) * 8999)).slice(0, 4);
+  const ruralUrban = pick(['Rural', 'Semi-urban', 'Urban'], r(97));
+  const address = `${villageName}, ${district}, ${state} - ${pincode}`;
+
+  // ---- loan / lender identity ----------------------------------------------
+  const companyId = 'SGM-01';
+  const customerId = 'CUST-' + (100000 + i);
+  const lenderId = pick(LENDER_BRANCHES, r(98));
+  const purpose = pick(PURPOSE_KEYS, r(99));
+  const subPurpose = pick(PURPOSES[purpose], r(100));
+  const repaymentFrequency = pick(REPAYMENT_FREQUENCIES, r(101));
+
+  // ---- financials: principal / interest / collections / arrears ------------
+  const intRate = 18 + Math.floor(r(102) * 12); // 18–30% p.a.
+  const totalInterest = Math.round(principal * (intRate / 100) * (totalInstallment / 12));
+  const totalAmount = principal + totalInterest;
+  const processingFee = Math.round(principal * (0.01 + r(103) * 0.02));
+
+  const principalCollected = Math.max(0, principal - outstanding);
+  const interestCollected = Math.round(totalInterest * (paidInstallment / totalInstallment));
+  const totalCollected = principalCollected + interestCollected;
+
+  const outstandingInterest = Math.max(0, totalInterest - interestCollected);
+  const totalOutstanding = outstanding + outstandingInterest;
+
+  const installmentsOverdue = odDays > 0 ? Math.min(outstandingInstallment, Math.max(1, Math.round(odDays / 30))) : 0;
+  const principalArrear = installmentsOverdue > 0 ? Math.round((principal / totalInstallment) * installmentsOverdue) : 0;
+  const interestArrear = installmentsOverdue > 0 ? Math.round((totalInterest / totalInstallment) * installmentsOverdue) : 0;
+  const totalArrear = principalArrear + interestArrear;
+
+  const lastCollAmount = Math.round(Math.floor(2500 + r(23) * 13500) * (0.6 + r(104) * 0.7));
+
+  const loanCreatedOnObj = new Date(disbDate);
+  loanCreatedOnObj.setDate(loanCreatedOnObj.getDate() - (1 + Math.floor(r(105) * 4)));
+  const loanCreatedOn = loanCreatedOnObj.toISOString().slice(0, 10);
+
+  const firstDemandDateObj = new Date(disbDate);
+  firstDemandDateObj.setDate(firstDemandDateObj.getDate() + 30);
+  const firstDemandDate = firstDemandDateObj.toISOString().slice(0, 10);
+
+  const lastMaturityDateObj = new Date(disbDate);
+  lastMaturityDateObj.setMonth(lastMaturityDateObj.getMonth() + totalInstallment);
+  const lastMaturityDate = lastMaturityDateObj.toISOString().slice(0, 10);
+
+  const freqDays = repaymentFrequency === 'Weekly' ? 7 : repaymentFrequency === 'Fortnightly' ? 15 : 30;
+  const nextDemandDateObj = new Date(2026, 8, 17);
+  nextDemandDateObj.setDate(nextDemandDateObj.getDate() + (freqDays - (odDays % freqDays)));
+  const nextDemandDate = nextDemandDateObj.toISOString().slice(0, 10);
+
   return {
     _id: 'brw_' + (1000 + i),
     refId: refId(i),
     loanId: 'LN-' + (480000 + i * 37),
-    name: pick(FIRST, r(7)) + ' ' + pick(LAST, r(8)),
+    name: `${firstName} ${lastName}`,
     mobile,
     bankAccount: bankVerified ? `${pick(BANKS, r(26))} ••${String(1000 + Math.floor(r(29) * 8999))}` : null,
     upiId: r(30) > 0.46 ? `${mobile}@${pick(UPI_HANDLES, r(31))}` : null,
@@ -183,11 +293,18 @@ function makeBorrower(i) {
     routing: cat.routing,
     outstanding,
     principal,
+    totalInstallment,
+    outstandingInstallment,
+    paidInstallment,
+    lastCollDate,
+    lastCollAmount,
+    lastContactDate,
     emiAmount: Math.floor(2500 + r(23) * 13500),
     product: pick(PRODUCTS, r(14)),
     disbursedOn: disbDate.toISOString().slice(0, 10),
     disbMonthsAgo: disbMonth,
-    status: odDays === 0 ? 'Current' : odDays > 90 ? 'NPA' : 'Overdue',
+    status,
+    odBucket,
     state,
     district,
     hasPan,
@@ -203,10 +320,302 @@ function makeBorrower(i) {
     coIvrCallOutcome: coIvr.outcome,
     coIvrChoice: coIvr.choice,
     coIvrReachable: coIvr.outcome === 'answered',
+
+    // ---- General loan information (portfolio import schema) --------------
+    companyId,
+    customerId,
+    purpose,
+    subPurpose,
+    villageName,
+    pincode,
+    repaymentFrequency,
+    totalPrincipal: principal,
+    totalInterest,
+    totalAmount,
+    principalCollected,
+    interestCollected,
+    totalCollected,
+    principalArrear,
+    interestArrear,
+    totalArrear,
+    principalOutstanding: outstanding,
+    outstandingInterest,
+    totalOutstanding,
+
+    // ---- Applicant / co-applicant / nominee -------------------------------
+    dob,
+    age,
+    gender,
+    applicantPan,
+    applicantAadhaar,
+    aadhaarStatus,
+    spouseName,
+    fatherName,
+    coApplicantName,
+    coApplicantMobile,
+    coApplicantPan,
+    nomineeName,
+    nomineeDob,
+    nomineeAge,
+    nomineeRelation,
+    address,
+    ruralUrban,
+    lenderId,
+    loanCreatedOn,
+    intRate,
+    processingFee,
+    firstDemandDate,
+    lastMaturityDate,
+    nextDemandDate,
+    emiOd: installmentsOverdue,
+
+    // ---- legacy/computed aliases used by the borrower-detail page --------
+    source: pick(PRODUCTS, r(14)),
+    instalOs: outstandingInstallment,
+    _prinTotal: principal,
+    _prinColl: principalCollected,
+    _intColl: interestCollected,
+    _totalArrear: totalArrear,
+    _totalInstal: totalInstallment,
+    _emiPaid: paidInstallment,
+    _lastEmi: Math.floor(2500 + r(23) * 13500),
+    _tenure: totalInstallment,
+    _disbDate: disbDate.toISOString().slice(0, 10),
+    _lastCollDate: lastCollDate,
+    _daysSince: daysSinceLastColl,
+    _od: odDays,
+    _odBucket: odBucket,
+    _status: status,
   };
 }
 
 export const BORROWERS = Array.from({ length: 220 }, (_, i) => makeBorrower(i + 1));
+
+// Per-category counts for the 2×2 grid + KPIs — derived from the actual
+// borrower book rather than a separate hand-maintained total, so "N scored"
+// on Cohort Intelligence always agrees with what View Portfolio actually
+// lists for that cohort. Every borrower is assigned a category up front (see
+// makeBorrower above), so none are held out as "pending".
+export const BORROWER_COUNTS = {
+  total: BORROWERS.length,
+  pending: 0,
+  categories: CATEGORIES.map((c) => {
+    const rows = BORROWERS.filter((b) => b.category === c.key);
+    return { key: c.key, label: c.label, count: rows.length, outstanding: rows.reduce((s, b) => s + b.outstanding, 0) };
+  }),
+};
+
+// Upload history behind the "Portfolio growth" trend — ramps up to the
+// current book size (BORROWERS.length) so the chart's latest point agrees
+// with every other "accounts on the book" figure in the app.
+export const UPLOADS = [
+  { _id: 'up_5', fileName: 'collections_book_aug2026.xlsx', totalRecords: BORROWERS.length, createdAt: '2026-09-05T06:30:00Z' },
+  { _id: 'up_4', fileName: 'collections_book_jul2026.xlsx', totalRecords: Math.round(BORROWERS.length * 0.94), createdAt: '2026-08-03T06:30:00Z' },
+  { _id: 'up_3', fileName: 'collections_book_jun2026.xlsx', totalRecords: Math.round(BORROWERS.length * 0.9), createdAt: '2026-07-02T06:30:00Z' },
+  { _id: 'up_2', fileName: 'collections_book_may2026.xlsx', totalRecords: Math.round(BORROWERS.length * 0.86), createdAt: '2026-06-04T06:30:00Z' },
+  { _id: 'up_1', fileName: 'initial_import.xlsx', totalRecords: Math.round(BORROWERS.length * 0.8), createdAt: '2026-05-06T06:30:00Z' },
+];
+export const LATEST_UPLOAD = UPLOADS[0];
+
+// Default worklists — one per Ability × Intent quadrant, seeded up front so
+// View Portfolio's worklists page isn't empty on a fresh book. Same shape as
+// the worklists a user builds by hand on View Portfolio (see
+// ViewPortfolioPage's CreateWorklistDialog).
+export const DEFAULT_WORKLISTS = CATEGORIES.map((c) => {
+  const rowIds = BORROWERS.filter((b) => b.category === c.key).map((b) => b._id);
+  return {
+    id: 'wl_default_' + c.key,
+    name: c.label,
+    count: rowIds.length,
+    criteria: [
+      { label: 'Ability', text: c.ability === 'high' ? 'High' : 'Low' },
+      { label: 'Intent', text: c.intent === 'high' ? 'High' : 'Low' },
+    ],
+    rowIds,
+    createdAt: new Date(LATEST_UPLOAD.createdAt).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  };
+});
+
+// ---------------------------------------------------------- collections cycle
+// Simulated outcome of the current EMI cycle, layered onto BORROWERS so the
+// Dashboard can show cycle-level collection KPIs (amount collected, collection
+// %, accounts collected) alongside each loan's standing arrear. ~66% of the
+// book pays something in a given cycle; the rest roll into arrear.
+BORROWERS.forEach((b, idx) => {
+  const r = seeded(idx * 977 + 3);
+  const paid = r > 0.34;
+  b.collectedThisCycle = paid
+    ? Math.min(b.outstanding, Math.round(b.emiAmount * (1 + Math.floor(seeded(idx * 977 + 17) * 3)) * (0.5 + seeded(idx * 977 + 11) * 0.5)))
+    : 0;
+});
+
+// ---------------------------------------------------------- promise-to-pay date
+// A PTP borrower committed to a specific date on the IVR sweep — kept here so
+// PTP Reminders (below) has something concrete to schedule against. Spread a
+// few days either side of "today" (17 Sep 2026, the same anchor the rest of
+// the mock data uses): some promises are still upcoming, some have already
+// come and gone (kept or broken, per collectedThisCycle).
+export const PTP_TODAY = new Date(2026, 8, 17);
+BORROWERS.forEach((b, idx) => {
+  if (b.ivrChoice !== 'will_pay') return;
+  const offsetDays = Math.floor(seeded(idx * 619 + 41) * 14) - 5; // −5..+8 days from today
+  const d = new Date(PTP_TODAY);
+  d.setDate(d.getDate() + offsetDays);
+  b.ptpDate = d.toISOString().slice(0, 10);
+});
+
+// ---------------------------------------------------------- per-call IVR log
+// The single ivrCheckedAt/ivrCallOutcome pair above is a *summary* — the bot
+// actually redials on no-answer/busy before landing on that final outcome.
+// This expands each summary into the individual dial attempts behind it, so
+// the borrower timeline can show "3 calls" with the full detail of each one.
+function buildCallAttempts(idx, party, mobile, checkedAt, finalOutcome, finalChoice, offset) {
+  if (!checkedAt) return [];
+  const s = (n) => seeded(idx * 151 + offset + n);
+  const maxAttempts =
+    finalOutcome === 'answered' ? 1 + Math.floor(s(1) * 3) : finalOutcome === 'invalid' ? 1 : 2 + Math.floor(s(1) * 2);
+  const checkedAtMs = new Date(checkedAt).getTime();
+  const attempts = [];
+  for (let k = 0; k < maxAttempts; k++) {
+    const isLast = k === maxAttempts - 1;
+    const outcome = isLast ? finalOutcome : s(10 + k) > 0.5 ? 'no_answer' : 'busy';
+    const minutesBack = (maxAttempts - 1 - k) * Math.round(25 + s(20 + k) * 95);
+    const dialedAt = new Date(checkedAtMs - minutesBack * 60000).toISOString();
+    const script = IVR_SCRIPTS[Math.floor(s(30 + k) * IVR_SCRIPTS.length)];
+    attempts.push({
+      id: `${idx}_${party}_${k + 1}`,
+      party,
+      attempt: k + 1,
+      totalAttempts: maxAttempts,
+      dialedAt,
+      mobile,
+      script: script.name,
+      outcome,
+      choice: outcome === 'answered' && isLast ? finalChoice : null,
+      durationSec:
+        outcome === 'answered' ? Math.round(22 + s(40 + k) * 98) : outcome === 'busy' ? Math.round(3 + s(41 + k) * 5) : 0,
+    });
+  }
+  return attempts;
+}
+BORROWERS.forEach((b, idx) => {
+  const coMobile = '9' + String(800000000 + Math.floor(seeded(idx * 151 + 3000) * 199999999));
+  const applicantCalls = buildCallAttempts(idx, 'applicant', b.mobile, b.ivrCheckedAt, b.ivrCallOutcome, b.ivrChoice, 1000);
+  const coApplicantCalls = b.hasCoApplicant
+    ? buildCallAttempts(idx, 'co-applicant', coMobile, b.coIvrCheckedAt, b.coIvrCallOutcome, b.coIvrChoice, 2000)
+    : [];
+  b.callLog = [...applicantCalls, ...coApplicantCalls].sort((x, y) => (x.dialedAt < y.dialedAt ? -1 : 1));
+});
+
+// Roll-up stats for the timeline's "Total calls" strip — total attempts,
+// how many connected, and when contactability was first established.
+export function callLogStats(doc) {
+  const calls = doc?.callLog || (doc?.record ? doc.record.callLog : null) || [];
+  const connected = calls.filter((c) => c.outcome === 'answered');
+  const firstConnected = connected.reduce((a, c) => (!a || c.dialedAt < a.dialedAt ? c : a), null);
+  const lastCall = calls.reduce((a, c) => (!a || c.dialedAt > a.dialedAt ? c : a), null);
+  return {
+    total: calls.length,
+    connectedCount: connected.length,
+    connectRate: calls.length ? Math.round((connected.length / calls.length) * 100) : null,
+    contactEstablishedAt: firstConnected?.dialedAt || null,
+    lastCallAt: lastCall?.dialedAt || null,
+  };
+}
+
+// --------------------------------------------------- per-message SMS/WA log
+// Each send progresses through a delivery funnel — how far it actually got
+// reaching the borrower, not just whether it was sent. SMS has no read
+// receipt; WhatsApp does.
+export const MESSAGE_STAGE_META = {
+  sent: { label: 'Sent', variant: 'default' },
+  delivered: { label: 'Delivered', variant: 'blue' },
+  read: { label: 'Read', variant: 'green' },
+  failed: { label: 'Failed', variant: 'red' },
+};
+const SMS_STAGES = ['sent', 'delivered', 'failed'];
+const SMS_WEIGHTS = [10, 70, 20];
+const WA_STAGES = ['sent', 'delivered', 'read', 'failed'];
+const WA_WEIGHTS = [10, 35, 45, 10];
+const REMINDER_TITLES = ['Pre-due nudge', 'Day-3 overdue reminder', 'Day-8 follow-up', 'Day-15 escalation notice'];
+
+function buildMessageLog(idx, channel, offset) {
+  const s = (n) => seeded(idx * 151 + offset + n);
+  const stages = channel === 'whatsapp' ? WA_STAGES : SMS_STAGES;
+  const weights = channel === 'whatsapp' ? WA_WEIGHTS : SMS_WEIGHTS;
+  const weightTotal = weights.reduce((a, b) => a + b, 0);
+  const count = 1 + Math.floor(s(1) * 4); // 1–4 sends over the cadence
+  const base = new Date(2026, 8, 8).getTime(); // cadence start, matches the day-8 workflow entry
+  const log = [];
+  for (let k = 0; k < count; k++) {
+    let t = s(20 + k) * weightTotal;
+    let stage = stages[stages.length - 1];
+    for (let i = 0; i < stages.length; i++) {
+      if (t < weights[i]) {
+        stage = stages[i];
+        break;
+      }
+      t -= weights[i];
+    }
+    const sentAt = new Date(base + k * (3 + Math.round(s(10 + k) * 4)) * 86400000).toISOString();
+    log.push({ id: `${idx}_${channel}_${k + 1}`, channel, title: REMINDER_TITLES[k % REMINDER_TITLES.length], date: sentAt, stage });
+  }
+  return log;
+}
+BORROWERS.forEach((b, idx) => {
+  b.smsLog = buildMessageLog(idx, 'sms', 4000);
+  b.whatsappLog = buildMessageLog(idx, 'whatsapp', 5000);
+});
+
+// Roll-up for the timeline strip — total sends per channel, and how far the
+// most recent send actually reached (sent/delivered/read/failed).
+export function messageLogStats(doc) {
+  const sms = doc?.smsLog || (doc?.record ? doc.record.smsLog : null) || [];
+  const whatsapp = doc?.whatsappLog || (doc?.record ? doc.record.whatsappLog : null) || [];
+  const latestOf = (log) => log.reduce((a, m) => (!a || m.date > a.date ? m : a), null);
+  const describe = (m) => (m ? { date: m.date, stage: m.stage, ...MESSAGE_STAGE_META[m.stage] } : null);
+  return {
+    smsTotal: sms.length,
+    whatsappTotal: whatsapp.length,
+    latestSms: describe(latestOf(sms)),
+    latestWhatsapp: describe(latestOf(whatsapp)),
+  };
+}
+
+// Sidebar Dashboard KPIs.
+export const DASHBOARD_STATS = (() => {
+  const totalAccounts = BORROWERS.length;
+  const totalArrear = BORROWERS.filter((b) => b.odDays > 0).reduce((s, b) => s + b.outstanding, 0);
+  const totalCollected = BORROWERS.reduce((s, b) => s + b.collectedThisCycle, 0);
+  const collectedAccounts = BORROWERS.filter((b) => b.collectedThisCycle > 0).length;
+  const collectionPct = totalCollected + totalArrear > 0 ? (totalCollected / (totalCollected + totalArrear)) * 100 : 0;
+
+  // PTP = borrower said "will pay" on the IVR sweep — a promise-to-pay.
+  const ptpBorrowers = BORROWERS.filter((b) => b.ivrChoice === 'will_pay');
+  const ptpCount = ptpBorrowers.length;
+  const ptpArrear = ptpBorrowers.filter((b) => b.odDays > 0).reduce((s, b) => s + b.outstanding, 0);
+  const ptpCollected = ptpBorrowers.reduce((s, b) => s + b.collectedThisCycle, 0);
+  const ptpHonoured = ptpBorrowers.filter((b) => b.collectedThisCycle > 0).length;
+  const ptpHonourRate = ptpCount > 0 ? (ptpHonoured / ptpCount) * 100 : 0;
+
+  return {
+    totalAccounts,
+    totalArrear,
+    totalCollected,
+    collectedAccounts,
+    ptpCount,
+    collectionPct,
+    ptpArrear,
+    ptpCollected,
+    ptpHonoured,
+    ptpHonourRate,
+  };
+})();
 
 // A couple of hand-built, fully detailed borrower docs for the borrower page.
 export const BORROWER_DETAIL = {
@@ -413,6 +822,10 @@ export function borrowerJourney(doc) {
           ? { variant: IVR_OPTION_BY_KEY[d.ivrChoice]?.variant || 'default', label: applChoice }
           : null,
       ].filter(Boolean),
+      channel: 'ivr',
+      status: d.ivrReachable ? 'Connected' : applOutcome || 'Not reached',
+      statusVariant: d.ivrReachable ? 'green' : 'red',
+      calls: d.callLog || rec.callLog || [],
     });
   }
 
@@ -452,12 +865,36 @@ export function borrowerJourney(doc) {
       detail: 'Reminder cadence and follow-up journey assigned for this cohort.',
       tags: [{ variant: 'green', label: 'workflow active' }],
     });
-    events.push({
-      date: '2026-09-08',
-      type: 'message',
-      title: 'WhatsApp — pre-due nudge',
-      detail: `“Hi ${first}, your EMI of ₹${Number(emi).toLocaleString('en-IN')} for ${d.loanId} is due soon.”`,
-      tags: [{ variant: 'green', label: 'delivered' }],
+    const whatsappLog = d.whatsappLog || rec.whatsappLog || [];
+    whatsappLog.forEach((m) => {
+      const meta = MESSAGE_STAGE_META[m.stage];
+      events.push({
+        date: m.date,
+        type: 'message',
+        title: `WhatsApp — ${m.title}`,
+        detail: `“Hi ${first}, your EMI of ₹${Number(emi).toLocaleString('en-IN')} for ${d.loanId} is due.” — ${meta.label.toLowerCase()}.`,
+        tags: [{ variant: meta.variant, label: meta.label }],
+        channel: 'whatsapp',
+        status: meta.label,
+        statusVariant: meta.variant,
+      });
+    });
+    const smsLog = d.smsLog || rec.smsLog || [];
+    smsLog.forEach((m) => {
+      const meta = MESSAGE_STAGE_META[m.stage];
+      events.push({
+        date: m.date,
+        type: 'message',
+        title: `SMS — ${m.title}`,
+        detail:
+          m.stage === 'failed'
+            ? 'Delivery failed — carrier rejected the message.'
+            : `“${first}, aapka EMI ${d.loanId} par baaki hai. Kripya turant bhugtan karein.” — ${meta.label.toLowerCase()}.`,
+        tags: [{ variant: meta.variant, label: meta.label }],
+        channel: 'sms',
+        status: meta.label,
+        statusVariant: meta.variant,
+      });
     });
     events.push({
       date: '2026-09-09',
@@ -465,11 +902,25 @@ export function borrowerJourney(doc) {
       title: 'AI bot call — day-9 reminder',
       detail: d.ivrReachable ? 'Connected. Borrower acknowledged dues.' : 'No answer after 3 attempts.',
       tags: [{ variant: d.ivrReachable ? 'green' : 'red', label: d.ivrReachable ? 'connected' : 'failed' }],
+      channel: 'ivr',
+      status: d.ivrReachable ? 'Connected' : 'No answer',
+      statusVariant: d.ivrReachable ? 'green' : 'red',
     });
   }
 
   events.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return { events };
+
+  // ---- last contact per channel — most recent tagged event of each kind ----
+  const CHANNEL_LABEL = { ivr: 'IVR call', whatsapp: 'WhatsApp', sms: 'SMS' };
+  const channels = Object.keys(CHANNEL_LABEL)
+    .map((key) => {
+      const latest = events.filter((e) => e.channel === key)[0]; // events is already newest-first
+      if (!latest) return null;
+      return { channel: key, label: CHANNEL_LABEL[key], date: latest.date, status: latest.status, statusVariant: latest.statusVariant };
+    })
+    .filter(Boolean);
+
+  return { events, channels };
 }
 
 /* ------------------------------------------------- import funnel breakdown */
@@ -562,6 +1013,23 @@ export const TEMPLATES = [
   { _id: 't4', template_id: 'CALL_01_REMINDER', template_message: 'Namaste $name. Aapka EMI $amount $emi_date ko due hai.', channel: 'AI Bot call', category: 'communication', language: 'hi', is_active: true, updatedAt: '2026-08-18T10:00:00Z' },
   { _id: 't5', template_id: 'SMS_OTP', template_message: '$otp is your Saralya verification code. Valid for $expiry minutes.', channel: 'SMS', category: 'auth', language: 'en', is_active: true, updatedAt: '2026-07-01T10:00:00Z' },
   { _id: 't6', template_id: 'WA_03_SETTLEMENT', template_message: 'Hi $name, a one-time settlement is available on loan $loan_id. View: $link', channel: 'WA', category: 'communication', language: 'en', is_active: false, updatedAt: '2026-06-10T10:00:00Z' },
+  { _id: 't7', template_id: 'WA_04_PTP_REMINDER', template_message: 'Hi $name, just a reminder — you promised to pay $amount on $ptp_date for loan $loan_id. Pay now: $link', channel: 'WA', category: 'communication', language: 'en', is_active: true, updatedAt: '2026-09-01T10:00:00Z' },
+  { _id: 't8', template_id: 'SMS_02_PTP_DUE', template_message: 'Dear $name, your promised payment of $amount for loan $loan_id is due today. Pay: $link -Sugam', channel: 'SMS', category: 'communication', language: 'en', is_active: true, updatedAt: '2026-09-01T10:00:00Z' },
+  { _id: 't9', template_id: 'CALL_02_PTP_BROKEN', template_message: 'Namaste $name. Aapne $ptp_date ko $amount jama karne ka vaada kiya tha. Kripya jald bharein.', channel: 'AI Bot call', category: 'communication', language: 'hi', is_active: true, updatedAt: '2026-09-01T10:00:00Z' },
+];
+
+/* -------------------------------------------------------- PTP reminders */
+// Reminder rules anchored to each borrower's own promised date (`ptpDate`)
+// rather than one shared calendar day — same rule shape as an EMI Reminders
+// workflow (offset + channel + template), just relative to a per-borrower
+// event instead of a monthly reference day. Offsets ≥ 0 only fire for a
+// borrower who hasn't paid yet this cycle (see `dueReminders` on PTPPage).
+export const PTP_REMINDERS = [
+  { _id: 'ptpr_1', name: 'Heads-up, 2 days before', trigger_offset: -2, channel: 'WA', templateId: 't7', is_active: true },
+  { _id: 'ptpr_2', name: 'Reminder, the day before', trigger_offset: -1, channel: 'SMS', templateId: 't8', is_active: true },
+  { _id: 'ptpr_3', name: 'Due today', trigger_offset: 0, channel: 'WA', templateId: 't7', is_active: true },
+  { _id: 'ptpr_4', name: 'Broken PTP follow-up call', trigger_offset: 1, channel: 'AI Bot call', templateId: 't9', is_active: true },
+  { _id: 'ptpr_5', name: 'Final nudge', trigger_offset: 3, channel: 'WA', templateId: 't7', is_active: false },
 ];
 
 /* -------------------------------------------------------------- workflows */
@@ -649,14 +1117,20 @@ export const WF_FILTER_OPTIONS = {
   priority: { MIN: 1, MAX: 5 },
 };
 
+// "IGL Loans" (WORKFLOWS[0]) sends every borrower a pre-due nudge (WA) and a
+// due-day reminder (WA+SMS, hence 2× messages/borrower), then hands whoever
+// is still overdue 3 days later into a journey — so that rule's population
+// is the book's real overdue count, not a made-up figure.
+const WF_OVERDUE_BORROWERS = BORROWERS.filter((b) => b.odDays > 0).length;
+
 export const WF_RUNS = {
   cycles_available: ['2026-09', '2026-08', '2026-07'],
   cycle: '2026-09',
-  borrowers_owned_by_journeys: 210,
+  borrowers_owned_by_journeys: 62,
   runs: [
-    { rule_id: 'ar1', rule_name: 'Pre-due nudge', trigger_offset: -3, cycle_month: '2026-09', borrowers: 1840, sent: 1802, failed: 38, messages: 1840, rule_exists: true, has_journey: false, journey: { outcomes: [] }, first_at: '2026-09-02T10:00:00Z', cron_runs: 1 },
-    { rule_id: 'ar2', rule_name: 'Due-day reminder', trigger_offset: 0, cycle_month: '2026-09', borrowers: 1840, sent: 3560, failed: 120, messages: 3680, rule_exists: true, has_journey: false, journey: { outcomes: [] }, first_at: '2026-09-05T10:00:00Z', cron_runs: 1 },
-    { rule_id: 'ar3', rule_name: 'Day-3 overdue + journey', trigger_offset: 3, cycle_month: '2026-09', borrowers: 640, sent: 620, failed: 20, messages: 640, rule_exists: true, has_journey: true, journey: { enrolled: 620, messages_sent: 480, in_flight: 210, outcomes: [{ outcome: 'Verified — collect ASAP', borrowers: 180 }, { outcome: 'Unreachable — needs call', borrowers: 90 }] }, first_at: '2026-09-08T11:00:00Z', cron_runs: 3 },
+    { rule_id: 'ar1', rule_name: 'Pre-due nudge', trigger_offset: -3, cycle_month: '2026-09', borrowers: BORROWERS.length, sent: 211, failed: 9, messages: BORROWERS.length, rule_exists: true, has_journey: false, journey: { outcomes: [] }, first_at: '2026-09-02T10:00:00Z', cron_runs: 1 },
+    { rule_id: 'ar2', rule_name: 'Due-day reminder', trigger_offset: 0, cycle_month: '2026-09', borrowers: BORROWERS.length, sent: 426, failed: 14, messages: BORROWERS.length * 2, rule_exists: true, has_journey: false, journey: { outcomes: [] }, first_at: '2026-09-05T10:00:00Z', cron_runs: 1 },
+    { rule_id: 'ar3', rule_name: 'Day-3 overdue + journey', trigger_offset: 3, cycle_month: '2026-09', borrowers: WF_OVERDUE_BORROWERS, sent: 178, failed: 6, messages: WF_OVERDUE_BORROWERS, rule_exists: true, has_journey: true, journey: { enrolled: WF_OVERDUE_BORROWERS, messages_sent: 368, in_flight: 62, outcomes: [{ outcome: 'Verified — collect ASAP', borrowers: 54 }, { outcome: 'Unreachable — needs call', borrowers: 27 }] }, first_at: '2026-09-08T11:00:00Z', cron_runs: 3 },
   ],
   silent_rules: [
     { rule_id: 'ar4', rule_name: 'Day-8 call', trigger_offset: 8, reason: 'inactive' },
@@ -665,31 +1139,31 @@ export const WF_RUNS = {
 
 export const WF_ANALYTICS = {
   cycles: [
-    { cycle: '2026-07', borrowers: 1720, sent: 4820, failed: 96, engaged: 540 },
-    { cycle: '2026-08', borrowers: 1780, sent: 5090, failed: 110, engaged: 610 },
-    { cycle: '2026-09', borrowers: 1840, sent: 5210, failed: 178, engaged: 690 },
+    { cycle: '2026-07', borrowers: 198, sent: 561, failed: 11, engaged: 63 },
+    { cycle: '2026-08', borrowers: 207, sent: 586, failed: 13, engaged: 70 },
+    { cycle: '2026-09', borrowers: BORROWERS.length, sent: 623, failed: 21, engaged: 82 },
   ],
   channelSplit: [
-    { channel: 'WA', sent: 3100 },
-    { channel: 'SMS', sent: 1900 },
-    { channel: 'AI Bot call', sent: 210 },
+    { channel: 'WA', sent: 371 },
+    { channel: 'SMS', sent: 227 },
+    { channel: 'AI Bot call', sent: 25 },
   ],
   topOutcomes: [
-    { outcome: 'Verified — collect ASAP', borrowers: 180 },
-    { outcome: 'Dispute — ops review', borrowers: 140 },
-    { outcome: 'Unreachable — needs call', borrowers: 90 },
+    { outcome: 'Verified — collect ASAP', borrowers: 54 },
+    { outcome: 'Dispute — ops review', borrowers: 41 },
+    { outcome: 'Unreachable — needs call', borrowers: 27 },
   ],
 };
 
 export const WF_SIMULATE = {
   cycle: { month: '2026-09' },
-  matchedBorrowers: 1840,
+  matchedBorrowers: BORROWERS.length,
   activeRules: 3,
-  totalMessages: 5210,
-  workflowBorrowers: 1200,
+  totalMessages: 623,
+  workflowBorrowers: 143,
   subWorkflows: [
-    { _id: 'sw_1', name: 'Young borrowers — softer tone', priority: 5, filters: { age_bands: ['UNDER_25', '25_TO_35'], states: [] }, matchedBorrowers: 420 },
-    { _id: 'sw_2', name: 'Bihar + UP — vernacular', priority: 3, filters: { age_bands: [], states: ['Bihar', 'Uttar Pradesh'] }, matchedBorrowers: 220 },
+    { _id: 'sw_1', name: 'Young borrowers — softer tone', priority: 5, filters: { age_bands: ['UNDER_25', '25_TO_35'], states: [] }, matchedBorrowers: 50 },
+    { _id: 'sw_2', name: 'Bihar + UP — vernacular', priority: 3, filters: { age_bands: [], states: ['Bihar', 'Uttar Pradesh'] }, matchedBorrowers: 26 },
   ],
   messages: BORROWERS.slice(0, 18).map((b, i) => ({
     borrower: { _id: b._id, name: b.name, mobile: b.mobile },
@@ -705,18 +1179,30 @@ export const WF_SIMULATE = {
 };
 
 /* --------------------------------------------------------- journey reports */
+// Whoever the workflow above hands into the journey (WF_OVERDUE_BORROWERS)
+// either opens the link or doesn't; either branch is mutually exclusive, so
+// they sum back to `enrolled`, and the terminal outcomes sum to `closed`.
+const JOURNEY_ENROLLED = WF_OVERDUE_BORROWERS;
+const JOURNEY_LINK_CLICKED = Math.round(JOURNEY_ENROLLED * (340 / 620));
+const JOURNEY_LINK_NOT_CLICKED = JOURNEY_ENROLLED - JOURNEY_LINK_CLICKED;
+const JOURNEY_OTP_VERIFIED = Math.round(JOURNEY_ENROLLED * (180 / 620));
+const JOURNEY_GAVE_UP = Math.round(JOURNEY_ENROLLED * (90 / 620));
+const JOURNEY_DISPUTE = Math.round(JOURNEY_ENROLLED * (140 / 620));
+const JOURNEY_CLOSED = JOURNEY_OTP_VERIFIED + JOURNEY_GAVE_UP + JOURNEY_DISPUTE;
+const JOURNEY_IN_FLIGHT = JOURNEY_ENROLLED - JOURNEY_CLOSED;
+
 export const JOURNEY_REPORT = {
-  totals: { enrolled: 620, in_flight: 210, closed: 410 },
+  totals: { enrolled: JOURNEY_ENROLLED, in_flight: JOURNEY_IN_FLIGHT, closed: JOURNEY_CLOSED },
   steps: [
-    { state: 'link_clicked', label: 'opened the link', kind: 'event', borrowers: 340, still_here: 0, messages_sent: 340, messages_failed: 4 },
-    { state: 'link_not_clicked', label: 'did NOT open the link', kind: 'timer', borrowers: 280, still_here: 120, messages_sent: 900, messages_failed: 30, next_due: '2026-09-12T10:00:00Z' },
-    { state: 'otp_verified', label: 'verified their OTP', kind: 'event', borrowers: 180, still_here: 0, messages_sent: 0, messages_failed: 0 },
-    { state: 'gave_up', label: 'never responded (final)', kind: 'timer', borrowers: 90, still_here: 0, messages_sent: 0, messages_failed: 0 },
+    { state: 'link_clicked', label: 'opened the link', kind: 'event', borrowers: JOURNEY_LINK_CLICKED, still_here: 0, messages_sent: JOURNEY_LINK_CLICKED, messages_failed: Math.round(JOURNEY_LINK_CLICKED * (4 / 340)) },
+    { state: 'link_not_clicked', label: 'did NOT open the link', kind: 'timer', borrowers: JOURNEY_LINK_NOT_CLICKED, still_here: Math.round(JOURNEY_LINK_NOT_CLICKED * (120 / 280)), messages_sent: Math.round(JOURNEY_LINK_NOT_CLICKED * (900 / 280)), messages_failed: Math.round(JOURNEY_LINK_NOT_CLICKED * (30 / 280)), next_due: '2026-09-12T10:00:00Z' },
+    { state: 'otp_verified', label: 'verified their OTP', kind: 'event', borrowers: JOURNEY_OTP_VERIFIED, still_here: 0, messages_sent: 0, messages_failed: 0 },
+    { state: 'gave_up', label: 'never responded (final)', kind: 'timer', borrowers: JOURNEY_GAVE_UP, still_here: 0, messages_sent: 0, messages_failed: 0 },
   ],
   outcomes: [
-    { outcome: 'Verified — collect ASAP', closed_at_state: 'otp_verified', borrowers: 180 },
-    { outcome: 'Unreachable — needs call', closed_at_state: 'gave_up', borrowers: 90 },
-    { outcome: 'Dispute — ops review', closed_at_state: 'details_rejected', borrowers: 140 },
+    { outcome: 'Verified — collect ASAP', closed_at_state: 'otp_verified', borrowers: JOURNEY_OTP_VERIFIED },
+    { outcome: 'Unreachable — needs call', closed_at_state: 'gave_up', borrowers: JOURNEY_GAVE_UP },
+    { outcome: 'Dispute — ops review', closed_at_state: 'details_rejected', borrowers: JOURNEY_DISPUTE },
   ],
 };
 
@@ -724,9 +1210,12 @@ export const JOURNEY_USAGE = [
   { owner: 'Procrastinator — standard cadence', rule: 'Day-3 overdue + journey' },
 ];
 
+// Same journey, same outcomes as JOURNEY_REPORT above — this is the
+// all-borrowers disposition view of it, so the totals must agree exactly
+// (a "closed" disposition is by definition one that has an outcome).
 export const DISPOSITION_REPORT = {
-  totals: { enrolled: 1240, closed: 820, in_flight: 420 },
-  total: 820,
+  totals: { enrolled: JOURNEY_ENROLLED, closed: JOURNEY_CLOSED, in_flight: JOURNEY_IN_FLIGHT },
+  total: JOURNEY_CLOSED,
   filters: { outcome_options: ['Verified — collect ASAP', 'Unreachable — needs call', 'Dispute — ops review', 'No response to scheme'] },
   outcomes: JOURNEY_REPORT.outcomes,
   rows: BORROWERS.slice(0, 40).map((b, i) => ({
@@ -747,43 +1236,63 @@ export const DISPOSITION_REPORT = {
 };
 
 /* --------------------------------------------------------- link analytics */
+// "Unique borrowers ... of X in your portfolio" on the page below is a direct
+// claim about the same book as BORROWERS, so every count here is derived from
+// it (or from another count already fixed to it) rather than hand-typed —
+// otherwise the funnel and the KPI strip drift apart the moment BORROWERS'
+// size changes.
+const LINK_TOTAL_BORROWERS = BORROWERS.length;
+const LINK_SENT = Math.round(LINK_TOTAL_BORROWERS * (3200 / 8421));
+const LINK_SENT_TOTAL = Math.round(LINK_SENT * (5400 / 3200));
+const LINK_UNIQUE = Math.round(LINK_SENT * (1860 / 3200));
+const LINK_OPEN_RATE = Math.round((LINK_UNIQUE / LINK_SENT) * 100);
+const LINK_TOTAL_CLICKS = Math.round(LINK_UNIQUE * (4100 / 1860));
+const LINK_UNIQUE_VISITS = Math.round(LINK_UNIQUE * (2600 / 1860));
+const LINK_OTP_VERIFIED = Math.round(LINK_UNIQUE * (1320 / 1860));
+const LINK_DETAILS_VIEWED = Math.round(LINK_UNIQUE * (1210 / 1860));
+const LINK_ACCEPTED = Math.round(LINK_UNIQUE * (720 / 1860));
+const LINK_REJECTED = Math.round(LINK_UNIQUE * (190 / 1860));
+const LINK_AWAITING = LINK_UNIQUE - LINK_ACCEPTED - LINK_REJECTED;
+const fromSent = (n) => Math.round((n / LINK_SENT) * 100);
+const fromClick = (n) => Math.round((n / LINK_UNIQUE) * 100);
+
 export const LINK_SUMMARY = {
   totals: {
-    linksSentBorrowers: 3200,
-    linksSentTotal: 5400,
-    openRate: 58,
-    totalClicks: 4100,
-    uniqueVisits: 2600,
-    uniqueBorrowers: 1860,
-    totalBorrowers: 8421,
-    accepted: 720,
-    rejected: 190,
-    awaitingResponse: 950,
+    linksSentBorrowers: LINK_SENT,
+    linksSentTotal: LINK_SENT_TOTAL,
+    openRate: LINK_OPEN_RATE,
+    totalClicks: LINK_TOTAL_CLICKS,
+    uniqueVisits: LINK_UNIQUE_VISITS,
+    uniqueBorrowers: LINK_UNIQUE,
+    totalBorrowers: LINK_TOTAL_BORROWERS,
+    accepted: LINK_ACCEPTED,
+    rejected: LINK_REJECTED,
+    awaitingResponse: LINK_AWAITING,
   },
   funnel: [
-    { stage: 'link_sent', label: 'Link sent', reachedBorrowers: 3200, events: 5400, currentBorrowers: 320, conversionFromSent: 100, conversionFromClick: null },
-    { stage: 'link_clicked', label: 'Link opened', reachedBorrowers: 1860, events: 4100, currentBorrowers: 210, conversionFromSent: 58, conversionFromClick: 100 },
-    { stage: 'otp_verified', label: 'OTP verified', reachedBorrowers: 1320, events: 1500, currentBorrowers: 180, conversionFromSent: 41, conversionFromClick: 71 },
-    { stage: 'loan_details_page', label: 'Viewed loan details', reachedBorrowers: 1210, events: 1240, currentBorrowers: 260, conversionFromSent: 38, conversionFromClick: 65 },
-    { stage: 'accepted', label: 'Confirmed correct', reachedBorrowers: 720, events: 720, currentBorrowers: 720, conversionFromSent: 22, conversionFromClick: 39 },
-    { stage: 'rejected', label: 'Disputed details', reachedBorrowers: 190, events: 190, currentBorrowers: 190, conversionFromSent: 6, conversionFromClick: 10 },
+    { stage: 'link_sent', label: 'Link sent', reachedBorrowers: LINK_SENT, events: LINK_SENT_TOTAL, currentBorrowers: Math.round(LINK_SENT * (320 / 3200)), conversionFromSent: 100, conversionFromClick: null },
+    { stage: 'link_clicked', label: 'Link opened', reachedBorrowers: LINK_UNIQUE, events: LINK_TOTAL_CLICKS, currentBorrowers: Math.round(LINK_UNIQUE * (210 / 1860)), conversionFromSent: fromSent(LINK_UNIQUE), conversionFromClick: 100 },
+    { stage: 'otp_verified', label: 'OTP verified', reachedBorrowers: LINK_OTP_VERIFIED, events: Math.round(LINK_OTP_VERIFIED * (1500 / 1320)), currentBorrowers: Math.round(LINK_OTP_VERIFIED * (180 / 1320)), conversionFromSent: fromSent(LINK_OTP_VERIFIED), conversionFromClick: fromClick(LINK_OTP_VERIFIED) },
+    { stage: 'loan_details_page', label: 'Viewed loan details', reachedBorrowers: LINK_DETAILS_VIEWED, events: Math.round(LINK_DETAILS_VIEWED * (1240 / 1210)), currentBorrowers: Math.round(LINK_DETAILS_VIEWED * (260 / 1210)), conversionFromSent: fromSent(LINK_DETAILS_VIEWED), conversionFromClick: fromClick(LINK_DETAILS_VIEWED) },
+    { stage: 'accepted', label: 'Confirmed correct', reachedBorrowers: LINK_ACCEPTED, events: LINK_ACCEPTED, currentBorrowers: LINK_ACCEPTED, conversionFromSent: fromSent(LINK_ACCEPTED), conversionFromClick: fromClick(LINK_ACCEPTED) },
+    { stage: 'rejected', label: 'Disputed details', reachedBorrowers: LINK_REJECTED, events: LINK_REJECTED, currentBorrowers: LINK_REJECTED, conversionFromSent: fromSent(LINK_REJECTED), conversionFromClick: fromClick(LINK_REJECTED) },
   ],
   devices: [
-    { type: 'mobile', events: 3600 },
-    { type: 'desktop', events: 380 },
-    { type: 'tablet', events: 120 },
+    { type: 'mobile', events: Math.round(LINK_TOTAL_CLICKS * 0.878) },
+    { type: 'desktop', events: Math.round(LINK_TOTAL_CLICKS * 0.0927) },
+    { type: 'tablet', events: LINK_TOTAL_CLICKS - Math.round(LINK_TOTAL_CLICKS * 0.878) - Math.round(LINK_TOTAL_CLICKS * 0.0927) },
   ],
   locations: [
-    { city: 'Patna', country: 'India', events: 640 },
-    { city: 'Lucknow', country: 'India', events: 520 },
-    { city: 'Pune', country: 'India', events: 410 },
-    { city: 'Jaipur', country: 'India', events: 300 },
-    { city: 'Indore', country: 'India', events: 240 },
+    { city: 'Patna', country: 'India', events: Math.round(LINK_TOTAL_CLICKS * (640 / 4100)) },
+    { city: 'Lucknow', country: 'India', events: Math.round(LINK_TOTAL_CLICKS * (520 / 4100)) },
+    { city: 'Pune', country: 'India', events: Math.round(LINK_TOTAL_CLICKS * (410 / 4100)) },
+    { city: 'Jaipur', country: 'India', events: Math.round(LINK_TOTAL_CLICKS * (300 / 4100)) },
+    { city: 'Indore', country: 'India', events: Math.round(LINK_TOTAL_CLICKS * (240 / 4100)) },
   ],
   daily: Array.from({ length: 21 }, (_, i) => ({
     date: `2026-09-${String(i + 1).padStart(2, '0')}`,
-    clicks: Math.round(80 + 120 * Math.abs(Math.sin(i / 3))),
-    borrowers: Math.round(50 + 70 * Math.abs(Math.sin(i / 3))),
+    clicks: Math.round(2 + 3 * Math.abs(Math.sin(i / 3))),
+    borrowers: Math.round(1 + 2 * Math.abs(Math.sin(i / 3))),
   })),
 };
 
@@ -956,6 +1465,48 @@ export const PROJECT_BILLING = [
   { project_id: 'prj_ncr', usage: { crif: 640, cibil: 0, equifax: 220, experian: 0, upi: 300, altcontact: 110, ivr: 1200, sms: 7400, whatsapp: 3100 } },
 ];
 
+// Six months of org-wide usage (all projects combined) behind the "Usage
+// history" trend on the billing page. The final entry equals PROJECT_BILLING
+// summed across projects, so the two views agree on the current month.
+export const BILLING_HISTORY = [
+  { month: '2026-04', usage: { crif: 1400, cibil: 370, equifax: 140, experian: 0, upi: 690, mobile2bank: 0, altcontact: 240, ivr: 2430, sms: 17900, whatsapp: 6340 } },
+  { month: '2026-05', usage: { crif: 1610, cibil: 430, equifax: 160, experian: 0, upi: 790, mobile2bank: 0, altcontact: 280, ivr: 2810, sms: 20700, whatsapp: 7320 } },
+  { month: '2026-06', usage: { crif: 1910, cibil: 500, equifax: 180, experian: 0, upi: 940, mobile2bank: 0, altcontact: 330, ivr: 3320, sms: 24500, whatsapp: 8660 } },
+  { month: '2026-07', usage: { crif: 1775, cibil: 470, equifax: 170, experian: 0, upi: 870, mobile2bank: 0, altcontact: 300, ivr: 3090, sms: 22800, whatsapp: 8050 } },
+  { month: '2026-08', usage: { crif: 2287, cibil: 600, equifax: 220, experian: 0, upi: 1120, mobile2bank: 0, altcontact: 390, ivr: 3980, sms: 29300, whatsapp: 10370 } },
+  { month: '2026-09', usage: { crif: 2690, cibil: 710, equifax: 260, experian: 0, upi: 1320, mobile2bank: 0, altcontact: 460, ivr: 4680, sms: 34500, whatsapp: 12200 } },
+];
+
+// Prepaid wallet that funds usage-based billing above. Every API call /
+// message send debits this balance; it's credited by the org itself (a paid
+// recharge) or by Saralya staff (a demo or promotional grant — see
+// WALLET_PURPOSES and the Organizations page in the staff console). Org Admin
+// only — never shown to org_user / org_manager. Lives on the org object
+// (see ALL_ORGANIZATIONS) rather than as its own export, so staff-console
+// credits and org-admin balances are the same record.
+export const WALLET_PURPOSES = [
+  { key: 'recharge', label: 'Wallet recharge credit', hint: 'A paid top-up — matches money actually received from the org.' },
+  { key: 'demo', label: 'Demo credit', hint: 'Free credit for a trial or proof-of-concept, not tied to any payment.' },
+  { key: 'promotional', label: 'Promotional credit', hint: 'A goodwill or campaign credit — e.g. a referral bonus or service-credit gesture.' },
+];
+export const WALLET_PURPOSE_BY_KEY = Object.fromEntries(WALLET_PURPOSES.map((p) => [p.key, p]));
+
+const SUGAM_WALLET = {
+  balance: 42350,
+  currency: 'INR',
+  low_balance_threshold: 15000,
+  auto_recharge: { enabled: true, threshold: 15000, top_up_amount: 50000 },
+  updated_at: '2026-09-17T18:42:00Z',
+  transactions: [
+    { id: 'wtx_1', type: 'debit', amount: 3120, balance_after: 42350, note: 'Daily usage — CRIF, SMS, WhatsApp', at: '2026-09-17T18:42:00Z' },
+    { id: 'wtx_2', type: 'debit', amount: 2860, balance_after: 45470, note: 'Daily usage — CIBIL, IVR, SMS', at: '2026-09-16T18:30:00Z' },
+    { id: 'wtx_3', type: 'credit', purpose: 'recharge', amount: 50000, balance_after: 48330, note: 'Manual top-up · UPI', at: '2026-09-14T10:05:00Z' },
+    { id: 'wtx_4', type: 'debit', amount: 2940, balance_after: -1670, note: 'Daily usage — CRIF, WhatsApp, altcontact', at: '2026-09-13T18:20:00Z' },
+    { id: 'wtx_5', type: 'debit', amount: 3310, balance_after: 1270, note: 'Daily usage — CIBIL, SMS, IVR', at: '2026-09-12T18:15:00Z' },
+    { id: 'wtx_6', type: 'credit', purpose: 'recharge', amount: 25000, balance_after: 4580, note: 'Auto-recharge · card on file', at: '2026-09-05T09:02:00Z' },
+  ],
+};
+
 export const TEAM = [
   { id: 'usr_9f21', name: 'Ananya Rao', email: 'ananya@sugamfinance.in', role: 'org_admin', isActive: true },
   { id: 'usr_a1', name: 'Rohit Menon', email: 'rohit@sugamfinance.in', role: 'org_user', isActive: true },
@@ -984,6 +1535,7 @@ export const ALL_ORGANIZATIONS = [
     admin: { name: 'Ananya Rao', email: 'ananya@sugamfinance.in', isActive: true },
     sms: { principal_entity_id: '1201178293431218138', sender_id: 'SUGAMF' },
     pricing: { cibil: 52, sms: 0.15, whatsapp: 0.72 }, // negotiated volume rates
+    wallet: SUGAM_WALLET,
     onboarding: {
       invite_email_status: 'delivered', invite_email_to: 'ananya@sugamfinance.in',
       invite_sent_at: '2025-02-11T09:01:00Z', invite_error: null, invite_attempts: 1,
@@ -1274,40 +1826,33 @@ export const DAYS_OF_WEEK = [
 // the source of truth, not array order, so dragging a node / rewiring an
 // edge genuinely changes execution order.
 export const PIPELINES = [
+  // The four Ability × Intent quadrants (see QuadrantRulesCard) — one
+  // pre-built workflow per quadrant, shaped around that segment's collection
+  // strategy rather than a generic chain.
   {
-    id: 'pl_1',
-    name: 'Bureau-first collection sweep',
-    createdAt: '2026-09-09T10:00:00Z',
+    id: 'pl_3',
+    name: 'High Ability, High Intent Borrowers (Saralya Suggested)',
+    createdAt: '2026-09-16T09:00:00Z',
     nodes: [
-      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: { dataSource: 'portfolio' }, deletable: false },
-      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'bureau', parties: { applicant: true, co_applicant: false } } },
-      {
-        id: 'n2', type: 'segment', position: { x: 380, y: 140 },
-        data: {
-          segments: [
-            { id: 'sg1', name: 'High exposure', conditions: [{ field: 'bureauActiveLines', op: 'gt', value: '3' }] },
-            { id: 'sg2', name: 'Good standing', conditions: [{ field: 'bureauScore', op: 'gte', value: '650' }] },
-          ],
-        },
-      },
-      { id: 'n3', type: 'action', position: { x: 720, y: 140 }, data: { action: 'ivr', parties: { applicant: true, co_applicant: false } } },
+      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: {}, deletable: false },
+      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'sms' } },
+      { id: 'n2', type: 'segment', position: { x: 380, y: 140 }, data: { segments: [{ id: 'sg1', name: 'Paid after nudge', conditions: [{ field: 'resolution', op: 'eq', value: 'accept' }] }] } },
     ],
     edges: [
       { id: 'e0', source: 'src', target: 'n1' },
       { id: 'e1', source: 'n1', target: 'n2' },
-      { id: 'e2', source: 'n2', target: 'n3' },
     ],
   },
   {
-    id: 'pl_2',
-    name: 'Contact-first, enrich the unreachable',
-    createdAt: '2026-09-11T10:00:00Z',
+    id: 'pl_4',
+    name: 'High Ability, Low Intent Borrowers (Saralya Suggested)',
+    createdAt: '2026-09-16T09:05:00Z',
     nodes: [
-      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: { dataSource: 'portfolio' }, deletable: false },
-      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'ivr', parties: { applicant: true, co_applicant: false } } },
-      { id: 'n2', type: 'segment', position: { x: 380, y: 140 }, data: { segments: [{ id: 'sg1', name: 'Unreachable', conditions: [{ field: 'ivrCallOutcome', op: 'eq', value: 'no_answer' }] }] } },
-      { id: 'n3', type: 'action', position: { x: 720, y: 140 }, data: { action: 'skiptrace' } },
-      { id: 'n4', type: 'action', position: { x: 1060, y: 140 }, data: { action: 'mobile2bank' } },
+      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: {}, deletable: false },
+      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'bureau', parties: { applicant: true, co_applicant: false } } },
+      { id: 'n2', type: 'action', position: { x: 380, y: 140 }, data: { action: 'ivr', parties: { applicant: true, co_applicant: false } } },
+      { id: 'n3', type: 'segment', position: { x: 720, y: 140 }, data: { segments: [{ id: 'sg1', name: 'Refusing to pay', conditions: [{ field: 'ivrChoice', op: 'eq', value: 'need_time' }] }] } },
+      { id: 'n4', type: 'action', position: { x: 1060, y: 140 }, data: { action: 'whatsapp' } },
     ],
     edges: [
       { id: 'e0', source: 'src', target: 'n1' },
@@ -1316,4 +1861,172 @@ export const PIPELINES = [
       { id: 'e3', source: 'n3', target: 'n4' },
     ],
   },
+  {
+    id: 'pl_5',
+    name: 'Low Ability, High Intent Borrowers (Saralya Suggested)',
+    createdAt: '2026-09-16T09:10:00Z',
+    nodes: [
+      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: {}, deletable: false },
+      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'bureau', parties: { applicant: true, co_applicant: false } } },
+      { id: 'n2', type: 'action', position: { x: 380, y: 140 }, data: { action: 'ivr', parties: { applicant: true, co_applicant: false } } },
+      {
+        id: 'n3', type: 'segment', position: { x: 720, y: 140 },
+        data: {
+          segments: [
+            { id: 'sg1', name: 'Confirmed high intent', conditions: [{ field: 'ivrChoice', op: 'eq', value: 'will_pay' }] },
+            { id: 'sg2', name: 'Low bureau score', conditions: [{ field: 'bureauScore', op: 'lt', value: '650' }] },
+          ],
+        },
+      },
+      { id: 'n4', type: 'action', position: { x: 1060, y: 140 }, data: { action: 'whatsapp' } },
+    ],
+    edges: [
+      { id: 'e0', source: 'src', target: 'n1' },
+      { id: 'e1', source: 'n1', target: 'n2' },
+      { id: 'e2', source: 'n2', target: 'n3' },
+      { id: 'e3', source: 'n3', target: 'n4' },
+    ],
+  },
+  {
+    id: 'pl_6',
+    name: 'Low Ability, Low Intent Borrowers (Saralya Suggested)',
+    createdAt: '2026-09-16T09:15:00Z',
+    nodes: [
+      { id: 'src', type: 'source', position: { x: -300, y: 140 }, data: {}, deletable: false },
+      { id: 'n1', type: 'action', position: { x: 40, y: 140 }, data: { action: 'skiptrace' } },
+      { id: 'n2', type: 'action', position: { x: 380, y: 140 }, data: { action: 'ivr', parties: { applicant: true, co_applicant: false } } },
+      { id: 'n3', type: 'segment', position: { x: 720, y: 140 }, data: { segments: [{ id: 'sg1', name: 'Unreachable', conditions: [{ field: 'ivrCallOutcome', op: 'eq', value: 'no_answer' }] }] } },
+    ],
+    edges: [
+      { id: 'e0', source: 'src', target: 'n1' },
+      { id: 'e1', source: 'n1', target: 'n2' },
+      { id: 'e2', source: 'n2', target: 'n3' },
+    ],
+  },
 ];
+
+/* ----------------------------------------------------------------- reports */
+//
+// A report is a named, point-in-time snapshot of the borrowers who reached a
+// particular outcome partway through a workflow run — e.g. "no answer" on the
+// IVR step of a pipeline — pulled out to hand to a team for the manual work
+// automation can't do (a field visit, a tele-calling list). Created from the
+// Workflows run drawer ("→ Create report" next to a step's outcome), it then
+// lives here for someone to work: assign each borrower to a person, track
+// what happened, add a remark. Distinct from a Worklist, whose membership is
+// hand-filtered from View Portfolio and which is re-run through automation
+// rather than worked by hand.
+export const REPORT_STATUSES = [
+  { key: 'pending', label: 'Pending', variant: 'default' },
+  { key: 'contacted', label: 'Contacted', variant: 'blue' },
+  { key: 'visited', label: 'Visited', variant: 'purple' },
+  { key: 'ptp', label: 'PTP taken', variant: 'green' },
+  { key: 'unreachable', label: 'Still unreachable', variant: 'red' },
+];
+export const REPORT_STATUS_BY_KEY = Object.fromEntries(REPORT_STATUSES.map((s) => [s.key, s]));
+
+const FIELD_TEAM = TEAM.filter((t) => t.role === 'org_user' && t.isActive);
+
+function buildReport({ id, name, purpose, source, createdAt, generatedBy, rows }) {
+  const assignments = {};
+  rows.forEach((b, i) => {
+    const r = seeded(hashStrSimple(id + b._id));
+    assignments[b._id] = {
+      assignee: r > 0.15 ? FIELD_TEAM[i % FIELD_TEAM.length]?.name || null : null,
+      status: r > 0.85 ? 'visited' : r > 0.7 ? 'contacted' : r > 0.62 ? 'ptp' : r > 0.55 ? 'unreachable' : 'pending',
+      remark: '',
+    };
+  });
+  return { id, name, purpose, source, createdAt, generatedBy, status: 'open', rowIds: rows.map((b) => b._id), assignments };
+}
+function hashStrSimple(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+export const REPORTS = [
+  buildReport({
+    id: 'rpt_1',
+    name: 'Contact-first, enrich the unreachable — IVR unreachable',
+    purpose: 'No answer, busy, or invalid number on the IVR step — handed to the ground field force for a doorstep visit.',
+    source: { pipelineName: 'Contact-first, enrich the unreachable', step: 'Automated Call (IVR)', outcome: 'No answer / Busy / Invalid number' },
+    createdAt: '2026-09-14T09:30:00Z',
+    generatedBy: 'Ananya Rao',
+    rows: BORROWERS.filter((b) => b.ivrCallOutcome && b.ivrCallOutcome !== 'answered').slice(0, 48),
+  }),
+  buildReport({
+    id: 'rpt_2',
+    name: 'Bureau-first collection sweep — wants an agent callback',
+    purpose: 'Pressed "talk to an agent" on the IVR keypad — call back before end of day.',
+    source: { pipelineName: 'Bureau-first collection sweep', step: 'Call answered — keypad', outcome: 'Wants an agent callback' },
+    createdAt: '2026-09-15T11:10:00Z',
+    generatedBy: 'Rohit Menon',
+    rows: BORROWERS.filter((b) => b.ivrChoice === 'callback').slice(0, 22),
+  }),
+  buildReport({
+    id: 'rpt_3',
+    name: 'Bureau-first collection sweep — loan disputed',
+    purpose: 'Disputes the loan or the amount — needs a manual review call, not another automated nudge.',
+    source: { pipelineName: 'Bureau-first collection sweep', step: 'Call answered — keypad', outcome: 'Disputes loan / amount' },
+    createdAt: '2026-09-16T15:00:00Z',
+    generatedBy: 'Ananya Rao',
+    rows: BORROWERS.filter((b) => b.ivrChoice === 'dispute').slice(0, 16),
+  }),
+];
+
+/* --------------------------------------------------------------- api logs */
+// Every outbound/inbound call the platform made against or on behalf of a
+// borrower — enrichment pulls, IVR dials, WhatsApp/SMS sends, payment links,
+// plus the webhooks partners fire back at us. Org Admin's "API logs" screen.
+const API_ENDPOINTS = [
+  { method: 'POST', path: '/v1/borrowers/:id/bureau-pull', label: 'Bureau pull' },
+  { method: 'POST', path: '/v1/borrowers/:id/pan-verify', label: 'PAN verification' },
+  { method: 'POST', path: '/v1/borrowers/:id/bank-verify', label: 'Bank account verification' },
+  { method: 'POST', path: '/v1/borrowers/:id/skiptrace', label: 'Skip trace' },
+  { method: 'POST', path: '/v1/ivr/dial', label: 'IVR dial' },
+  { method: 'POST', path: '/v1/whatsapp/send', label: 'WhatsApp send' },
+  { method: 'POST', path: '/v1/sms/send', label: 'SMS send' },
+  { method: 'POST', path: '/v1/payments/link', label: 'Payment link create' },
+  { method: 'GET', path: '/v1/loans/:id', label: 'Loan lookup' },
+  { method: 'PATCH', path: '/v1/borrowers/:id', label: 'Borrower update' },
+  { method: 'POST', path: '/v1/webhooks/payment-status', label: 'Payment status webhook' },
+];
+const API_STATUS_WEIGHTS = [
+  [200, 52], [201, 12], [202, 8], [400, 8], [401, 3], [404, 5], [429, 5], [500, 4],
+];
+const API_ACTORS = [
+  ...TEAM.map((t) => t.name),
+  'System · Scheduled workflow',
+  'System · Collection pipeline',
+  'API key · sk_live_4f2a…c91',
+];
+function weightedPick(pairs, r) {
+  const total = pairs.reduce((s, [, w]) => s + w, 0);
+  let t = r * total;
+  for (const [v, w] of pairs) {
+    if (t < w) return v;
+    t -= w;
+  }
+  return pairs[pairs.length - 1][0];
+}
+export const API_LOGS = Array.from({ length: 70 }, (_, i) => {
+  const r = (n) => seeded(i * 41 + n);
+  const ep = pick(API_ENDPOINTS, r(1));
+  const status = weightedPick(API_STATUS_WEIGHTS, r(2));
+  const borrower = pick(BORROWERS, r(3));
+  const minutesAgo = Math.floor(r(4) * 60 * 24 * 30); // spread over the last 30 days
+  return {
+    _id: 'log_' + (10000 + i),
+    createdAt: new Date(Date.now() - minutesAgo * 60000).toISOString(),
+    method: ep.method,
+    path: ep.path.replace(':id', borrower.refId),
+    label: ep.label,
+    status,
+    latencyMs: Math.floor(80 + r(5) * 1500),
+    borrowerName: borrower.name,
+    loanId: borrower.loanId,
+    actor: pick(API_ACTORS, r(6)),
+    ip: `103.${Math.floor(r(7) * 250)}.${Math.floor(r(8) * 250)}.${Math.floor(r(9) * 250)}`,
+  };
+}).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));

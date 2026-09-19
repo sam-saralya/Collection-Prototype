@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStaff } from './store.jsx';
+import { EditGate } from './shared.jsx';
 import { Card, Button, SectionTitle, Field, Input, Select, Textarea } from '../../ui.jsx';
 import { IVR_SCRIPTS, IVR_OPTIONS } from '../../lib.js';
 
@@ -13,13 +14,13 @@ const defaultCfg = () => ({
   scripts: IVR_SCRIPTS.map((s) => ({ ...s, digits: s.digits.map((d) => [...d]) })),
 });
 
-export default function IvrConfigPage() {
-  const { organizations, showToast } = useStaff();
-  const [orgId, setOrgId] = useState(organizations[0]?._id || '');
+export function IvrConfigForm({ orgId }) {
+  const { organizations } = useStaff();
+  const [savedByOrg, setSavedByOrg] = useState({});
   const [cfgByOrg, setCfgByOrg] = useState({});
 
   const org = organizations.find((o) => o._id === orgId);
-  const cfg = cfgByOrg[orgId] || defaultCfg();
+  const cfg = cfgByOrg[orgId] || savedByOrg[orgId] || defaultCfg();
 
   const patch = (p) => setCfgByOrg((m) => ({ ...m, [orgId]: { ...cfg, ...p } }));
   const patchScript = (i, p) => patch({ scripts: cfg.scripts.map((s, j) => (j === i ? { ...s, ...p } : s)) });
@@ -33,18 +34,11 @@ export default function IvrConfigPage() {
   const removeScript = (i) => patch({ scripts: cfg.scripts.filter((_, j) => j !== i) });
 
   return (
-    <div>
-      <div className="mb-4 flex items-center gap-3">
-        <b className="text-[12px]">Configure IVR for</b>
-        <Select value={orgId} onChange={(e) => setOrgId(e.target.value)} className="w-56 text-xs">
-          {organizations.map((o) => (
-            <option key={o._id} value={o._id}>
-              {o.name}
-            </option>
-          ))}
-        </Select>
-      </div>
-
+    <EditGate
+      label={`IVR configuration for ${org?.name}`}
+      onSave={() => setSavedByOrg((m) => ({ ...m, [orgId]: cfg }))}
+      onCancel={() => setCfgByOrg((m) => { const { [orgId]: _drop, ...rest } = m; return rest; })}
+    >
       <Card pad className="mb-4">
         <SectionTitle title="IVR provider" note="the calling account for this tenant" />
         <div className="grid grid-cols-2 gap-3 max-[700px]:grid-cols-1">
@@ -132,10 +126,27 @@ export default function IvrConfigPage() {
           )}
         </div>
 
-        <Button variant="primary" className="mt-4" onClick={() => showToast(`IVR configuration saved for ${org?.name}`, 'success')}>
-          Save IVR configuration
-        </Button>
       </Card>
+    </EditGate>
+  );
+}
+
+export default function IvrConfigPage() {
+  const { organizations } = useStaff();
+  const [orgId, setOrgId] = useState(organizations[0]?._id || '');
+  return (
+    <div>
+      <div className="mb-4 flex items-center gap-3">
+        <b className="text-[12px]">Configure IVR for</b>
+        <Select value={orgId} onChange={(e) => setOrgId(e.target.value)} className="w-56 text-xs">
+          {organizations.map((o) => (
+            <option key={o._id} value={o._id}>
+              {o.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <IvrConfigForm key={orgId} orgId={orgId} />
     </div>
   );
 }

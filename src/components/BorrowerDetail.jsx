@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { partyReachability, exportCsv } from '../lib.js';
-import { Tag, Button, Spinner, cx } from '../ui.jsx';
+import { partyReachability, exportCsv, fmtDate, IVR_OUTCOME_BY_KEY, IVR_OPTION_BY_KEY } from '../lib.js';
+import { Tag, Button, Spinner, cx, Field, Input, Textarea } from '../ui.jsx';
+import { useUI } from '../store.jsx';
 import { BUREAU_SAMPLE } from '../bureauSample.js';
+import { borrowerJourney, callLogStats, messageLogStats } from '../data.js';
 
 // Adapted from the production client's src/components/BorrowerDetail.jsx.
 // Same layout; the two async sub-fetches (credit report, comms history) are
@@ -422,8 +424,352 @@ function TradelinesCard({ className = '' }) {
   );
 }
 
+// Log a follow-up against the loan — collection amount, PTP date, call/visit
+// remarks. Each is its own quick action: click a button to open just that
+// entry field, save it, and it's timestamped and added to the history below.
+function LogUpdateForm({ onSave, className = '' }) {
+  const [open, setOpen] = useState(null); // 'amount' | 'ptp' | 'remarks' | null
+  const [amount, setAmount] = useState('');
+  const [ptpDate, setPtpDate] = useState('');
+  const [callRemarks, setCallRemarks] = useState('');
+  const [visitRemarks, setVisitRemarks] = useState('');
+
+  function toggle(key) {
+    setOpen((o) => (o === key ? null : key));
+  }
+  function cancel() {
+    setOpen(null);
+    setAmount('');
+    setPtpDate('');
+    setCallRemarks('');
+    setVisitRemarks('');
+  }
+  function save(fields) {
+    onSave({ amount: null, ptpDate: null, callRemarks: null, visitRemarks: null, ...fields, loggedAt: new Date().toISOString() });
+    cancel();
+  }
+
+  const ACTIONS = [
+    { key: 'amount', label: '₹ Payment collected' },
+    { key: 'ptp', label: 'Log PTP' },
+    { key: 'remarks', label: 'Call/visit remarks' },
+  ];
+
+  return (
+    <section className={cx('overflow-hidden rounded-[10px] border border-line', className)}>
+      <header className="bg-ink px-3 py-1.5 text-white">
+        <h3 className="text-[12px] font-extrabold tracking-tight">Log an update</h3>
+      </header>
+      <div className={cx('flex flex-wrap gap-1.5 bg-white px-3 py-2.5', open && 'border-b border-line')}>
+        {ACTIONS.map((a) => (
+          <Button key={a.key} size="xs" variant={open === a.key ? 'primary' : 'default'} onClick={() => toggle(a.key)}>
+            {a.label}
+          </Button>
+        ))}
+      </div>
+
+      {open === 'amount' && (
+        <div className="bg-white px-3 pb-2.5 pt-1">
+          <Field label="Collection amount">
+            <Input
+              type="number"
+              min="0"
+              placeholder="₹ amount collected"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button size="xs" onClick={cancel}>Cancel</Button>
+            <Button size="xs" variant="primary" disabled={amount === ''} onClick={() => save({ amount: Number(amount) })}>
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {open === 'ptp' && (
+        <div className="bg-white px-3 pb-2.5 pt-1">
+          <Field label="PTP date">
+            <Input type="date" value={ptpDate} onChange={(e) => setPtpDate(e.target.value)} autoFocus />
+          </Field>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button size="xs" onClick={cancel}>Cancel</Button>
+            <Button size="xs" variant="primary" disabled={!ptpDate} onClick={() => save({ ptpDate })}>
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {open === 'remarks' && (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 bg-white px-3 pb-2.5 pt-1 max-[700px]:grid-cols-1">
+          <Field label="Call remarks" className="col-span-2">
+            <Textarea
+              rows={2}
+              placeholder="What did the borrower say on the call?"
+              value={callRemarks}
+              onChange={(e) => setCallRemarks(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <Field label="Visit remarks" className="col-span-2">
+            <Textarea rows={2} placeholder="Field visit outcome" value={visitRemarks} onChange={(e) => setVisitRemarks(e.target.value)} />
+          </Field>
+          <div className="col-span-2 flex justify-end gap-2">
+            <Button size="xs" onClick={cancel}>Cancel</Button>
+            <Button
+              size="xs"
+              variant="primary"
+              disabled={!callRemarks.trim() && !visitRemarks.trim()}
+              onClick={() => save({ callRemarks: callRemarks.trim() || null, visitRemarks: visitRemarks.trim() || null })}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UpdatesLog({ items, className = '' }) {
+  if (!items.length) return null;
+  return (
+    <section className={cx('overflow-hidden rounded-[10px] border border-line', className)}>
+      <header className="flex items-baseline justify-between gap-3 bg-brand-2 px-3 py-1.5 text-white">
+        <h3 className="text-[12px] font-extrabold tracking-tight">Update history</h3>
+        <span className="text-[10px] font-semibold opacity-80">{items.length} logged</span>
+      </header>
+      <div className="divide-y divide-line bg-white">
+        {items.map((u, i) => (
+          <div key={i} className="px-3 py-2.5 text-[12px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-ink">{fmtDate(u.loggedAt)}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {u.amount != null && <Tag variant="green">Collected {money(u.amount)}</Tag>}
+              </div>
+            </div>
+            {u.callRemarks && (
+              <p className="mt-1 leading-snug text-muted">
+                <span className="font-semibold text-ink">Call: </span>
+                {u.callRemarks}
+              </p>
+            )}
+            {u.visitRemarks && (
+              <p className="mt-1 leading-snug text-muted">
+                <span className="font-semibold text-ink">Visit: </span>
+                {u.visitRemarks}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── PTP History — every promise-to-pay date the borrower has given, and
+// whatever was actually collected against it. Seeded from the IVR sweep's own
+// promise (doc.ptpDate / doc.collectedThisCycle); anything logged later via
+// "Log an update" → Log PTP is appended, newest first, and shows "Not yet
+// recorded" until a collection is logged against it.
+function PTPHistoryCard({ rows, className = '' }) {
+  if (!rows.length) return null;
+  return (
+    <section className={cx('overflow-hidden rounded-[10px] border border-line', className)}>
+      <header className="flex items-baseline justify-between gap-3 bg-mint px-3 py-1.5 text-white">
+        <h3 className="text-[12px] font-extrabold tracking-tight">PTP History</h3>
+        <span className="text-[10px] font-semibold opacity-80">{rows.length} promise{rows.length === 1 ? '' : 's'}</span>
+      </header>
+      <div className="overflow-x-auto bg-white">
+        <table className="w-full border-collapse text-[12px]">
+          <thead>
+            <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-wide text-muted">
+              <th className="px-3 py-1.5 font-semibold">PTP date</th>
+              <th className="px-3 py-1.5 font-semibold">Amount collected</th>
+              <th className="px-3 py-1.5 font-semibold"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className={cx('border-b border-line last:border-0', i % 2 === 1 && 'bg-black/[.02]')}>
+                <td className="px-3 py-1.5 font-bold text-ink">{day(row.date)}</td>
+                <td className="px-3 py-1.5 font-semibold">
+                  {row.amount != null ? money(row.amount) : <span className="font-normal text-muted">Not yet recorded</span>}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  {row.honoured === true && <Tag variant="green">Honoured</Tag>}
+                  {row.honoured === false && <Tag variant="amber">Not paid yet</Tag>}
+                  {row.honoured == null && <Tag>Logged</Tag>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ── last contact per channel — a compact strip on the Summary tab showing
+// when each outreach channel last touched this borrower, and how it went.
+function LastContactByChannel({ channels, className = '' }) {
+  if (!channels?.length) return null;
+  return (
+    <section className={cx('overflow-hidden rounded-[10px] border border-line', className)}>
+      <header className="flex items-baseline justify-between gap-3 bg-ink px-3 py-1.5 text-white">
+        <h3 className="text-[12px] font-extrabold tracking-tight">Last contact by channel</h3>
+      </header>
+      <div className="divide-y divide-line bg-white">
+        {channels.map((c) => (
+          <div key={c.channel} className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="text-[11.5px] font-bold text-ink">{c.label}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-muted">{day(c.date)}</span>
+              <Tag variant={c.statusVariant}>{c.status}</Tag>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── borrower timeline — every workflow/contactability pass that has run for
+// this borrower, newest first. Each IVR-backed event carries the individual
+// dial attempts behind its summary; CallDetailHoverCard reveals them without
+// cluttering the row itself.
+const EVENT_TONE = {
+  import: '#64748b',
+  contactability: '#2563eb',
+  enrichment: '#7c3aed',
+  segmentation: '#d97706',
+  workflow: '#16a34a',
+  message: '#0f766e',
+};
+
+function CallDetailHoverCard({ calls }) {
+  const [open, setOpen] = useState(false);
+  if (!calls?.length) return null;
+  return (
+    <span className="relative inline-block" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-2 py-0.5 text-[10px] font-extrabold text-brand hover:bg-brand/5"
+      >
+        {calls.length} call{calls.length === 1 ? '' : 's'} ▾
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1.5 w-[21rem] rounded-[10px] border border-line bg-white p-2 shadow-lg">
+          <div className="mb-1.5 px-1 text-[9.5px] font-extrabold uppercase tracking-[.05em] text-muted">
+            Call attempts · {calls.length}
+          </div>
+          <div className="max-h-64 space-y-1.5 overflow-y-auto">
+            {calls.map((c) => {
+              const outcome = IVR_OUTCOME_BY_KEY[c.outcome];
+              const choice = c.choice ? IVR_OPTION_BY_KEY[c.choice] : null;
+              return (
+                <div key={c.id} className="rounded-lg border border-line bg-slate-50/60 px-2 py-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-ink">
+                      {c.party === 'applicant' ? 'Applicant' : 'Co-applicant'} · Attempt {c.attempt}/{c.totalAttempts}
+                    </span>
+                    <Tag variant={outcome?.variant || 'default'}>{outcome?.label || c.outcome}</Tag>
+                  </div>
+                  <div className="mt-1 text-muted">
+                    {fmtDate(c.dialedAt)} · {c.mobile}
+                  </div>
+                  <div className="mt-0.5 text-muted">
+                    {c.script}
+                    {c.durationSec ? ` · ${c.durationSec}s` : ''}
+                  </div>
+                  {choice && (
+                    <div className="mt-1">
+                      <Tag variant={choice.variant}>{choice.label}</Tag>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+function TimelineEventRow({ event, isLast }) {
+  return (
+    <div className="relative flex gap-3">
+      <div className="flex flex-col items-center">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-white">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: EVENT_TONE[event.type] || '#94a3b8' }} />
+        </span>
+        {!isLast && <span className="mt-1 w-px flex-1 bg-line" />}
+      </div>
+      <div className="min-w-0 flex-1 pb-4">
+        <div className="rounded-[10px] border border-line bg-white px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[12px] font-extrabold text-ink">{event.title}</span>
+            <span className="text-[10px] font-semibold text-muted">{day(event.date)}</span>
+          </div>
+          <p className="mt-1 text-[11.5px] leading-snug text-muted">{event.detail}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {event.tags?.map((t, i) => (
+              <Tag key={i} variant={t.variant}>
+                {t.label}
+              </Tag>
+            ))}
+            <CallDetailHoverCard calls={event.calls} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineStatsStrip({ callStats, msgStats }) {
+  const items = [
+    ['Total calls', callStats.total || 0],
+    ['Total SMS', msgStats.smsTotal || 0],
+    ['Total WhatsApp', msgStats.whatsappTotal || 0],
+    ['Connected', callStats.connectedCount || 0],
+    ['Connect rate', callStats.connectRate != null ? `${callStats.connectRate}%` : '—'],
+    ['Contactability established', callStats.contactEstablishedAt ? day(callStats.contactEstablishedAt) : 'Not yet'],
+  ];
+  return (
+    <div className="grid grid-cols-4 gap-3 max-[900px]:grid-cols-2">
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-[10px] border border-line bg-white px-3 py-2.5">
+          <div className="text-[9.5px] font-extrabold uppercase tracking-[.05em] text-muted">{label}</div>
+          <div className="mt-0.5 text-[15px] font-extrabold leading-none text-ink">{value}</div>
+        </div>
+      ))}
+      <div className="col-span-2 rounded-[10px] border border-line bg-white px-3 py-2.5">
+        <div className="text-[9.5px] font-extrabold uppercase tracking-[.05em] text-muted">
+          Latest SMS — how far it reached
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          {msgStats.latestSms ? (
+            <>
+              <Tag variant={msgStats.latestSms.variant}>{msgStats.latestSms.label}</Tag>
+              <span className="text-[11px] font-semibold text-muted">{day(msgStats.latestSms.date)}</span>
+            </>
+          ) : (
+            <span className="text-[13px] font-bold text-muted">No SMS sent yet</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   ['summary', 'Summary'],
+  ['timeline', 'Timeline'],
   ['personal', 'Personal Information'],
   ['loan', 'Loan Information'],
   ['bureau', 'Credit Bureau'],
@@ -432,11 +778,16 @@ const TABS = [
 ];
 
 export default function BorrowerDetail({ borrower }) {
+  const { showToast, borrowerHandle, borrowerUpdates, addBorrowerUpdate } = useUI();
   const [tab, setTab] = useState('summary');
+  const updates = borrowerUpdates[borrowerHandle] || [];
   if (!borrower) return null;
   const doc = borrower;
   const r = doc.record || doc;
   const bureau = r.bureau || {};
+  const journey = borrowerJourney(doc);
+  const callStats = callLogStats(doc);
+  const msgStats = messageLogStats(doc);
 
   const bankNameSplitIdx = doc.bankAccount ? doc.bankAccount.lastIndexOf(' ') : -1;
   const bankName = bankNameSplitIdx > -1 ? doc.bankAccount.slice(0, bankNameSplitIdx) : doc.bankAccount;
@@ -534,6 +885,15 @@ export default function BorrowerDetail({ borrower }) {
     ['Days since last payment', days(r._daysSince)],
   ];
 
+  const ptpRows = [];
+  if (doc.ptpDate) {
+    ptpRows.push({ date: doc.ptpDate, amount: doc.collectedThisCycle ?? null, honoured: (doc.collectedThisCycle ?? 0) > 0 });
+  }
+  updates.forEach((u) => {
+    if (u.ptpDate) ptpRows.push({ date: u.ptpDate, amount: u.amount, honoured: u.amount != null ? u.amount > 0 : null });
+  });
+  ptpRows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
   const currentPosition = [
     ['Status', text(r._status)],
     ['OD days', days(r._od ?? doc.odDays)],
@@ -566,6 +926,31 @@ export default function BorrowerDetail({ borrower }) {
       {tab === 'summary' && (
         <div>
           <Section title="Current position" rows={currentPosition} />
+          <PTPHistoryCard rows={ptpRows} className="mt-4" />
+          <LastContactByChannel channels={journey.channels} className="mt-4" />
+          <LogUpdateForm
+            className="mt-4"
+            onSave={(entry) => {
+              addBorrowerUpdate(borrowerHandle, entry);
+              showToast('Update logged for ' + (r.name || doc.name || 'borrower'), 'success');
+            }}
+          />
+          <UpdatesLog items={updates.filter((u) => !u.ptpDate)} className="mt-4" />
+        </div>
+      )}
+
+      {tab === 'timeline' && (
+        <div className="mt-4">
+          <TimelineStatsStrip callStats={callStats} msgStats={msgStats} />
+          {journey.events.length ? (
+            <div className="mt-4">
+              {journey.events.map((ev, i) => (
+                <TimelineEventRow key={`${ev.type}-${ev.date}-${i}`} event={ev} isLast={i === journey.events.length - 1} />
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 text-[11.5px] font-medium text-muted">No workflow or contact activity recorded yet.</p>
+          )}
         </div>
       )}
 

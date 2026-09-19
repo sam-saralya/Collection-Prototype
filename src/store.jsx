@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { PIPELINES } from './data.js';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { PIPELINES, REPORTS, DEFAULT_WORKLISTS } from './data.js';
+import { loadPersisted, savePersisted } from './persist.js';
 
 // A tiny stand-in for the production app's four React contexts + router.
 // Pages call `useUI()` exactly as they do in the real client; here it is backed
@@ -7,6 +8,13 @@ import { PIPELINES } from './data.js';
 
 // Grouped console navigation.
 export const NAV_GROUPS = [
+  {
+    label: 'Overview',
+    items: [
+      { key: 'dashboard', label: 'Dashboard', icon: '▦' },
+      { key: 'analytics', label: 'Analytics', icon: '◈' },
+    ],
+  },
   {
     label: 'Portfolio',
     items: [
@@ -18,15 +26,14 @@ export const NAV_GROUPS = [
     label: 'Engagement',
     items: [
       { key: 'pipelines', label: 'Collection Workflow', icon: '⛓' },
+      { key: 'ptp', label: 'Promise to Pay', icon: '☑' },
+      { key: 'ptpReminders', label: 'PTP Reminders', icon: '🔔' },
       { key: 'workflows', label: 'EMI Reminders', icon: '⌁' },
     ],
   },
   {
-    label: 'Messaging',
-    items: [
-      { key: 'templates', label: 'Message Templates', icon: '✦' },
-      { key: 'whatsappAdmin', label: 'WhatsApp Templates', icon: '✎' },
-    ],
+    label: 'Reports',
+    items: [{ key: 'reports', label: 'Reports', icon: '▤' }],
   },
   {
     label: 'Settings',
@@ -59,10 +66,40 @@ export function UIProvider({ children }) {
 
   // Worklists — named, filter-defined slices of the loan book built on View
   // Portfolio. Shared here so Contactability / Enrich can run on them too.
-  const [worklists, setWorklists] = useState([]);
+  const [worklists, setWorklists] = useState(DEFAULT_WORKLISTS);
   const [focusWorklist, setFocusWorklist] = useState(null);
   const addWorklist = useCallback((wl) => setWorklists((w) => [wl, ...w]), []);
   const removeWorklist = useCallback((id) => setWorklists((w) => w.filter((x) => x.id !== id)), []);
+  const removeWorklistMembers = useCallback((id, borrowerIds) => {
+    const drop = new Set(borrowerIds);
+    setWorklists((w) =>
+      w.map((x) => {
+        if (x.id !== id) return x;
+        const rowIds = x.rowIds.filter((r) => !drop.has(r));
+        return { ...x, rowIds, count: rowIds.length };
+      })
+    );
+  }, []);
+
+  // Reports — snapshots of the borrowers who reached a particular outcome
+  // partway through a workflow run (created from the run drawer on the
+  // Workflows page), then worked by hand: assigned to someone, tracked
+  // through a status, remarked on. Shown on their own Reports page.
+  const [reports, setReports] = useState(REPORTS);
+  const addReport = useCallback((r) => setReports((rs) => [r, ...rs]), []);
+  const removeReport = useCallback((id) => setReports((rs) => rs.filter((r) => r.id !== id)), []);
+  const setReportStatus = useCallback((id, status) => setReports((rs) => rs.map((r) => (r.id === id ? { ...r, status } : r))), []);
+  const updateReportAssignment = useCallback(
+    (reportId, borrowerId, patch) =>
+      setReports((rs) =>
+        rs.map((r) =>
+          r.id === reportId
+            ? { ...r, assignments: { ...r.assignments, [borrowerId]: { ...r.assignments[borrowerId], ...patch } } }
+            : r
+        )
+      ),
+    []
+  );
 
   // Pipelines — lifted up here (rather than local to PipelinesPage) because
   // the builder is now its own full page/section, so the list needs to
@@ -87,6 +124,42 @@ export function UIProvider({ children }) {
     window.scrollTo({ top: 0 });
   }, []);
   const removePipeline = useCallback((id) => setPipelines((ps) => ps.filter((p) => p.id !== id)), []);
+
+  // Per-borrower "log an update" entries (payment/PTP/remarks) from the
+  // borrower detail view — keyed by borrower handle so they persist across
+  // navigating away and back.
+  const [borrowerUpdates, setBorrowerUpdates] = useState({});
+  const addBorrowerUpdate = useCallback(
+    (handle, entry) =>
+      setBorrowerUpdates((bu) => ({ ...bu, [handle]: [entry, ...(bu[handle] || [])] })),
+    []
+  );
+
+  // Persistence: hydrate the bits above from the SQLite-backed server on
+  // mount, then push them back on every change (debounced). Nothing here is
+  // validated server-side — it's just a JSON blob that survives a reload.
+  const hydrated = useRef(false);
+  useEffect(() => {
+    loadPersisted().then((saved) => {
+      if (saved && typeof saved === 'object') {
+        if (saved.worklists) setWorklists(saved.worklists);
+        if (saved.reports) setReports(saved.reports);
+        if (saved.pipelines) setPipelines(saved.pipelines);
+        if (saved.borrowerUpdates) setBorrowerUpdates(saved.borrowerUpdates);
+      }
+      hydrated.current = true;
+    });
+  }, []);
+
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    if (!hydrated.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      savePersisted({ worklists, reports, pipelines, borrowerUpdates });
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [worklists, reports, pipelines, borrowerUpdates]);
 
   const goTo = useCallback((key, category = null) => {
     setFocusCategory(category);
@@ -136,14 +209,22 @@ export function UIProvider({ children }) {
       worklists,
       addWorklist,
       removeWorklist,
+      removeWorklistMembers,
       focusWorklist,
       setFocusWorklist,
+      reports,
+      addReport,
+      removeReport,
+      setReportStatus,
+      updateReportAssignment,
       pipelines,
       pipelineDraft,
       openPipelineBuilder,
       closePipelineBuilder,
       savePipeline,
       removePipeline,
+      borrowerUpdates,
+      addBorrowerUpdate,
     }),
     [
       section,
@@ -158,13 +239,21 @@ export function UIProvider({ children }) {
       worklists,
       addWorklist,
       removeWorklist,
+      removeWorklistMembers,
       focusWorklist,
+      reports,
+      addReport,
+      removeReport,
+      setReportStatus,
+      updateReportAssignment,
       pipelines,
       pipelineDraft,
       openPipelineBuilder,
       closePipelineBuilder,
       savePipeline,
       removePipeline,
+      borrowerUpdates,
+      addBorrowerUpdate,
     ]
   );
 

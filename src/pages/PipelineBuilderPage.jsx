@@ -5,7 +5,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useUI } from '../store.jsx';
-import { Button, Empty, Input, Select, Tag, cx } from '../ui.jsx';
+import { Button, Empty, Input, Select, Tag, Textarea, cx } from '../ui.jsx';
 import { PIPELINE_ACTIONS, PIPELINE_ACTION_BY_KEY, SEGMENT_OPERATORS, DAYS_OF_WEEK, TEMPLATES } from '../data.js';
 import { IVR_CALL_OUTCOMES, IVR_OPTIONS, IVR_OPTION_BY_KEY, IVR_SCRIPTS, IVR_SCRIPT_BY_ID } from '../lib.js';
 
@@ -60,7 +60,7 @@ function styledEdges(edges) {
 /* ════════════════════════════════════════════════════════════════════════
  * Pipeline builder — a full page (not a drawer): a flowchart canvas (React
  * Flow) with the step palette living in a persistent left sidebar, grouped
- * by kind (Enrichment / Communication), plus a manual Segmentation node.
+ * by kind (Communication), plus a manual Segmentation node and a Report node.
  * Drag any step onto the canvas in any order, wire them up by dragging
  * connections between step handles. Run the resulting chain from the
  * Pipelines list.
@@ -70,19 +70,18 @@ const newId = (p) => `${p}_${Date.now().toString(36)}${Math.floor(Math.random() 
 
 const STEP_GROUPS = [
   { kind: 'contactability', label: 'Communication' },
-  { kind: 'enrichment', label: 'Enrichment' },
 ];
 
-// Every workflow starts from a Data source node — which borrowers it runs on
-// (the whole portfolio, or a worklist already built on View Portfolio). It
-// has no incoming edge, so it's always the graph root `linearize()` starts
-// from, and it can't be deleted.
+// Every workflow starts from a Data input node — a generic entry point with
+// no borrowers attached yet. It has no incoming edge, so it's always the
+// graph root `linearize()` starts from, and it can't be deleted. It always
+// runs against the whole portfolio when the workflow is run.
 function makeSourceNode(x = -300) {
   return {
     id: newId('src'),
     type: 'source',
     position: { x, y: 140 },
-    data: { dataSource: 'portfolio' },
+    data: {},
     deletable: false,
   };
 }
@@ -155,15 +154,13 @@ function DotHandle({ nodeId, type, side, id, color, selected }) {
   );
 }
 
-function SourceNode({ id, data, selected }) {
-  const { worklists } = useUI();
-  const sourceLabel = !data.dataSource || data.dataSource === 'portfolio' ? 'Whole portfolio' : worklists.find((w) => w.id === data.dataSource)?.name || 'Worklist';
+function SourceNode({ id, selected }) {
   return (
     <div className={cx('group relative w-52 rounded-[10px] border bg-amber-50 p-2.5 shadow-sm', selected ? 'border-amber-500 ring-2 ring-amber-300/50' : 'border-amber-300')}>
       <div className="flex items-center gap-2">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-amber-400 text-[12px] text-white">📂</span>
         <div className="min-w-0">
-          <div className="truncate text-[12px] font-bold leading-tight">{sourceLabel}</div>
+          <div className="truncate text-[12px] font-bold leading-tight">Data input</div>
         </div>
       </div>
       {/* Root of the graph — source-only, but on all 4 sides so the first
@@ -408,7 +405,25 @@ function RetryNode({ id, data, selected }) {
   );
 }
 
+// Report is a terminal step too: it collects every borrower who reaches it
+// and turns them into a named report when the workflow runs.
+function ReportNode({ id, data, selected }) {
+  return (
+    <div className={cx('group relative w-52 rounded-[10px] border bg-sky-50 p-2.5 shadow-sm', selected ? 'border-sky-500 ring-2 ring-sky-300/50' : 'border-sky-300')}>
+      <TargetHandles nodeId={id} color="!bg-sky-500" selected={selected} sides={['left', 'top', 'right', 'bottom']} />
+      <div className="flex items-center gap-2">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-500 text-[12px] text-white">📄</span>
+        <div className="min-w-0">
+          <div className="truncate text-[12px] font-bold leading-tight">Generate report</div>
+          <div className="truncate text-[9.5px] text-muted">{data.reportName?.trim() || 'Unnamed report'}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const NODE_TYPES = {
+  report: ReportNode,
   source: SourceNode,
   action: ActionNode,
   sms: SmsNode,
@@ -458,37 +473,35 @@ function StepPalette({ onAdd }) {
           Retry
         </button>
       </div>
-      <ActionGroup group={STEP_GROUPS.find((g) => g.kind === 'enrichment')} onAdd={onAdd} />
+      <div>
+        <div className="px-1 pb-1.5 text-[10px] font-extrabold uppercase tracking-[.1em] text-muted">Output</div>
+        <button
+          className="flex w-full items-center gap-2 rounded-[10px] border border-sky-300 bg-sky-50 px-2.5 py-2 text-left text-[11.5px] font-semibold text-sky-700 shadow-sm hover:border-sky-500"
+          onClick={() => onAdd('report')}
+          title="Generate a report of every borrower who reaches this step"
+        >
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-500 text-[12px] text-white">📄</span>
+          Generate report
+        </button>
+      </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════════ inspector — a node */
 
-function SourceInspector({ node, onChange }) {
-  const { worklists } = useUI();
-  const dataSource = node.data.dataSource || 'portfolio';
+function SourceInspector() {
   return (
     <div>
       <div className="flex items-center gap-2">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-400 text-[13px] text-white">📂</span>
         <div>
-          <b className="text-[13px]">Data source</b>
+          <b className="text-[13px]">Data input</b>
         </div>
       </div>
-      <p className="mt-2 text-[11.5px] leading-snug text-muted">Pick which borrowers this workflow runs on.</p>
-      <div className="mt-3 space-y-1.5 border-t border-line pt-3">
-        <span className="field-label">Borrowers</span>
-        <Select className="w-full text-[11.5px]" value={dataSource} onChange={(e) => onChange({ dataSource: e.target.value })}>
-          <option value="portfolio">Whole portfolio</option>
-          {worklists.map((w) => (
-            <option key={w.id} value={w.id}>{w.name} ({w.count})</option>
-          ))}
-        </Select>
-        {dataSource !== 'portfolio' && worklists.length === 0 && (
-          <div className="text-[10.5px] text-muted">No worklists yet — build one on View Portfolio.</div>
-        )}
-      </div>
+      <p className="mt-2 text-[11.5px] leading-snug text-muted">
+        The start of the workflow. It runs against the whole portfolio.
+      </p>
     </div>
   );
 }
@@ -713,6 +726,32 @@ function RetryInspector({ node, onChange, onDelete }) {
   );
 }
 
+function ReportInspector({ node, onChange, onDelete }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-500 text-[13px] text-white">📄</span>
+        <div>
+          <b className="text-[13px]">Generate report</b>
+          <div className="text-[10px] text-muted">collects every borrower who reaches this step</div>
+        </div>
+      </div>
+      <div className="mt-3 space-y-1.5 border-t border-line pt-3">
+        <span className="field-label">Report name</span>
+        <Input className="w-full text-[11.5px]" value={node.data.reportName || ''} onChange={(e) => onChange({ reportName: e.target.value })} placeholder="e.g. SMS not delivered" />
+      </div>
+      <div className="mt-3 space-y-1.5 border-t border-line pt-3">
+        <span className="field-label">Report description</span>
+        <Textarea rows={3} className="w-full text-[11.5px]" value={node.data.reportDescription || ''} onChange={(e) => onChange({ reportDescription: e.target.value })} placeholder="e.g. Needs a doorstep visit before month end" />
+        <p className="text-[10.5px] leading-snug text-muted">When the workflow runs, a report with this name and description is created under Reports.</p>
+      </div>
+      <Button size="xs" variant="danger" className="mt-4" onClick={onDelete}>
+        Delete step
+      </Button>
+    </div>
+  );
+}
+
 function ActionInspector({ node, onChange, onDelete }) {
   const action = PIPELINE_ACTION_BY_KEY[node.data.action];
   return (
@@ -851,16 +890,18 @@ const SPAWN_NODE_FOR_HANDLE = {
 // Steps whose "next node" is a deliberate, named choice (a multi-branch or a
 // terminal state) rather than a single generic exit — addNode's tail
 // auto-wire skips these when picking what a newly-added node chains after.
-const NO_AUTO_TAIL_TYPES = ['sms', 'whatsapp', 'delivered', 'ivr', 'call_answered', 'retry'];
+const NO_AUTO_TAIL_TYPES = ['sms', 'whatsapp', 'delivered', 'ivr', 'call_answered', 'retry', 'report'];
 function newRetryData() {
   return { schedule: DAYS_OF_WEEK.map((d) => ({ day: d.key, time: '10:00' })), durationDays: 3 };
 }
 function newNodeData(type) {
-  return type === 'retry' ? newRetryData() : {};
+  if (type === 'retry') return newRetryData();
+  if (type === 'report') return { reportName: '' };
+  return {};
 }
 
 function Builder() {
-  const { pipelineDraft, closePipelineBuilder, savePipeline } = useUI();
+  const { pipelineDraft, closePipelineBuilder, savePipeline, removePipeline } = useUI();
   const initial = pipelineDraft && pipelineDraft !== 'new' ? pipelineDraft : null;
   const { screenToFlowPosition } = useReactFlow();
 
@@ -943,6 +984,8 @@ function Builder() {
       data = { segments: [] };
     } else if (kind === 'retry') {
       data = newRetryData();
+    } else if (kind === 'report') {
+      data = newNodeData('report');
     } else {
       type = 'action';
       data = { action: actionKey, ...(PIPELINE_ACTION_BY_KEY[actionKey].parties ? { parties: { applicant: true, co_applicant: false } } : {}) };
@@ -995,6 +1038,17 @@ function Builder() {
           Drag steps from the left onto the canvas, wire them up by dragging between the dots, click an arrow to delete it.
         </span>
         <div className="flex-1" />
+        {initial && (
+          <button
+            className="text-[10.5px] font-semibold text-muted hover:text-danger"
+            onClick={() => {
+              removePipeline(initial.id);
+              closePipelineBuilder();
+            }}
+          >
+            Delete workflow
+          </button>
+        )}
         <Button
           size="xs"
           variant="primary"
@@ -1042,6 +1096,8 @@ function Builder() {
             <IvrInspector node={selectedNode} onChange={updateSelected} onDelete={deleteSelected} />
           ) : selectedNode.type === 'call_answered' ? (
             <CallAnsweredInspector onDelete={deleteSelected} />
+          ) : selectedNode.type === 'report' ? (
+            <ReportInspector node={selectedNode} onChange={updateSelected} onDelete={deleteSelected} />
           ) : selectedNode.type === 'retry' ? (
             <RetryInspector node={selectedNode} onChange={updateSelected} onDelete={deleteSelected} />
           ) : (

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Empty, Tag, cx } from '../ui.jsx';
-import { fmt, fmtI, dpdBucket } from '../lib.js';
+import { fmt, fmtI } from '../lib.js';
 
 // A spreadsheet-style loans grid. Columns are organised into groups —
-// loan file fields, then bureau data — shown as banded group headers.
+// general loan info, applicant / co-applicant / nominee, then bureau data —
+// shown as banded group headers.
 // Every column header has an Excel-style dropdown: Sort ↑ / ↓, a search box,
 // and a checkbox list of that column's distinct values (number & date columns
 // also get a "between" range). Several column filters apply at once; active
@@ -14,43 +15,139 @@ const STATUS_TAG = { Current: 'green', Overdue: 'amber', NPA: 'red' };
 const shortDate = (x) =>
   x ? new Date(x).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-export const GROUPS = ['Loan file', 'Bureau'];
+export const GROUPS = ['General loan information', 'Applicant information', 'Co-applicant information', 'Nominee information', 'Bureau'];
 export const GROUP_TINT = {
-  'Loan file': 'bg-slate-100 text-slate-600',
+  'General loan information': 'bg-slate-100 text-slate-600',
+  'Applicant information': 'bg-sky-50 text-sky-700',
+  'Co-applicant information': 'bg-amber-50 text-amber-700',
+  'Nominee information': 'bg-emerald-50 text-emerald-700',
   Bureau: 'bg-fuchsia-50 text-fuchsia-700',
 };
 
+const money = (get) => ({ type: 'number', money: true, get, cell: (b) => fmtI(get(b)), align: 'right' });
+const date = (get) => ({ type: 'date', get, cell: (b) => <span className="text-muted">{shortDate(get(b))}</span> });
+
 export const COLUMNS = [
-  // ── from the uploaded portfolio file ──────────────────────────────────────
-  { key: 'loanId', group: 'Loan file', label: 'Loan ID', type: 'text', get: (b) => b.loanId, cell: (b) => <span className="font-mono text-[11px]">{b.loanId}</span> },
-  { key: 'name', group: 'Loan file', label: 'Borrower', type: 'text', get: (b) => b.name },
-  { key: 'mobile', group: 'Loan file', label: 'Mobile', type: 'text', get: (b) => b.mobile },
-  { key: 'product', group: 'Loan file', label: 'Product', type: 'text', get: (b) => b.product },
-  { key: 'state', group: 'Loan file', label: 'State', type: 'text', get: (b) => b.state },
-  { key: 'district', group: 'Loan file', label: 'District', type: 'text', get: (b) => b.district },
-  { key: 'disbursedOn', group: 'Loan file', label: 'Disbursed', type: 'date', get: (b) => b.disbursedOn, cell: (b) => <span className="text-muted">{shortDate(b.disbursedOn)}</span> },
-  { key: 'principal', group: 'Loan file', label: 'Principal', type: 'number', money: true, get: (b) => b.principal, cell: (b) => fmtI(b.principal), align: 'right' },
-  { key: 'outstanding', group: 'Loan file', label: 'Outstanding', type: 'number', money: true, get: (b) => b.outstanding, cell: (b) => <span className="font-semibold">{fmtI(b.outstanding)}</span>, align: 'right' },
-  { key: 'emiAmount', group: 'Loan file', label: 'EMI', type: 'number', money: true, get: (b) => b.emiAmount, cell: (b) => fmtI(b.emiAmount), align: 'right' },
-  { key: 'odDays', group: 'Loan file', label: 'DPD', type: 'number', get: (b) => b.odDays, cell: (b) => (b.odDays === 0 ? '—' : `${b.odDays} d`), align: 'right' },
-  { key: 'dpdBucket', group: 'Loan file', label: 'DPD bucket', type: 'text', get: (b) => (b.odDays === 0 ? 'Current' : dpdBucket(b.odDays)) },
-  { key: 'status', group: 'Loan file', label: 'Status', type: 'text', get: (b) => b.status, cell: (b) => <Tag variant={STATUS_TAG[b.status]}>{b.status}</Tag> },
+  // ── General loan information ────────────────────────────────────────────
+  { key: 'companyId', group: 'General loan information', label: 'Company ID', type: 'text', get: (b) => b.companyId },
+  { key: 'customerId', group: 'General loan information', label: 'Customer ID', type: 'text', get: (b) => b.customerId },
+  { key: 'loanId', group: 'General loan information', label: 'Loan no.', type: 'text', get: (b) => b.loanId, cell: (b) => <span className="font-mono text-[11px]">{b.loanId}</span> },
+  { key: 'disbursedOn', group: 'General loan information', label: 'Disbursement date', ...date((b) => b.disbursedOn) },
+  { key: 'purpose', group: 'General loan information', label: 'Purpose', type: 'text', get: (b) => b.purpose },
+  { key: 'subPurpose', group: 'General loan information', label: 'Sub-purpose', type: 'text', get: (b) => b.subPurpose },
+  { key: 'villageName', group: 'General loan information', label: 'Village', type: 'text', get: (b) => b.villageName },
+  { key: 'district', group: 'General loan information', label: 'District', type: 'text', get: (b) => b.district },
+  { key: 'state', group: 'General loan information', label: 'State', type: 'text', get: (b) => b.state },
+  { key: 'pincode', group: 'General loan information', label: 'Pincode', type: 'text', get: (b) => b.pincode },
+  { key: 'lastCollDate', group: 'General loan information', label: 'Last collection date', ...date((b) => b.lastCollDate) },
+  { key: 'lastCollAmount', group: 'General loan information', label: 'Last collection amount', ...money((b) => b.lastCollAmount) },
+  { key: 'odDays', group: 'General loan information', label: 'OD days', type: 'number', get: (b) => b.odDays, cell: (b) => (b.odDays === 0 ? '—' : `${b.odDays} d`), align: 'right' },
+  { key: 'odBucket', group: 'General loan information', label: 'OD bucket', type: 'text', get: (b) => b.odBucket },
+  { key: 'repaymentFrequency', group: 'General loan information', label: 'Repayment frequency', type: 'text', get: (b) => b.repaymentFrequency },
+  { key: 'lastContactDate', group: 'General loan information', label: 'Last contact date', ...date((b) => b.lastContactDate) },
+
+  { key: 'totalInstallment', group: 'General loan information', label: 'Total installment', type: 'number', get: (b) => b.totalInstallment, align: 'right' },
+  { key: 'outstandingInstallment', group: 'General loan information', label: 'Outstanding installment', type: 'number', get: (b) => b.outstandingInstallment, align: 'right' },
+  { key: 'paidInstallment', group: 'General loan information', label: 'Paid installment', type: 'number', get: (b) => b.paidInstallment, align: 'right' },
+
+  { key: 'totalPrincipal', group: 'General loan information', label: 'Total principal', ...money((b) => b.totalPrincipal) },
+  { key: 'totalInterest', group: 'General loan information', label: 'Total interest', ...money((b) => b.totalInterest) },
+  { key: 'totalAmount', group: 'General loan information', label: 'Total amount', ...money((b) => b.totalAmount) },
+
+  { key: 'principalCollected', group: 'General loan information', label: 'Principal collected', ...money((b) => b.principalCollected) },
+  { key: 'interestCollected', group: 'General loan information', label: 'Interest collected', ...money((b) => b.interestCollected) },
+  { key: 'totalCollected', group: 'General loan information', label: 'Total collected', ...money((b) => b.totalCollected) },
+
+  { key: 'principalArrear', group: 'General loan information', label: 'Principal arrear', ...money((b) => b.principalArrear) },
+  { key: 'interestArrear', group: 'General loan information', label: 'Interest arrear', ...money((b) => b.interestArrear) },
+  { key: 'totalArrear', group: 'General loan information', label: 'Total arrear', ...money((b) => b.totalArrear) },
+
+  { key: 'principalOutstanding', group: 'General loan information', label: 'Principal outstanding', ...money((b) => b.principalOutstanding) },
+  { key: 'outstandingInterest', group: 'General loan information', label: 'Interest outstanding', ...money((b) => b.outstandingInterest) },
+  { key: 'totalOutstanding', group: 'General loan information', label: 'Total outstanding', ...money((b) => b.totalOutstanding) },
+
+  { key: 'status', group: 'General loan information', label: 'Status', type: 'text', get: (b) => b.status, cell: (b) => <Tag variant={STATUS_TAG[b.status]}>{b.status}</Tag> },
+  { key: 'collectedThisCycle', group: 'General loan information', label: 'Amount collected', ...money((b) => b.collectedThisCycle ?? 0) },
+  { key: 'ptpDate', group: 'General loan information', label: 'Last PTP date', ...date((b) => b.ptpDate) },
+
+  // ── Applicant information ───────────────────────────────────────────────
+  { key: 'name', group: 'Applicant information', label: 'Applicant name', type: 'text', get: (b) => b.name },
+  { key: 'dob', group: 'Applicant information', label: 'Date of birth', ...date((b) => b.dob) },
+  { key: 'age', group: 'Applicant information', label: 'Age', type: 'number', get: (b) => b.age, align: 'right' },
+  { key: 'gender', group: 'Applicant information', label: 'Gender', type: 'text', get: (b) => b.gender },
+  { key: 'mobile', group: 'Applicant information', label: 'Applicant mobile', type: 'text', get: (b) => b.mobile },
+  { key: 'applicantPan', group: 'Applicant information', label: 'Applicant PAN', type: 'text', get: (b) => b.applicantPan || '' },
+  { key: 'applicantAadhaar', group: 'Applicant information', label: 'Applicant Aadhaar', type: 'text', get: (b) => b.applicantAadhaar || '' },
+  { key: 'spouseName', group: 'Applicant information', label: 'Spouse name', type: 'text', get: (b) => b.spouseName || '' },
+
+  // ── Co-applicant information ────────────────────────────────────────────
+  { key: 'coApplicantName', group: 'Co-applicant information', label: 'Co-applicant name', type: 'text', get: (b) => b.coApplicantName || '' },
+  { key: 'coApplicantMobile', group: 'Co-applicant information', label: 'Co-applicant mobile', type: 'text', get: (b) => b.coApplicantMobile || '' },
+  { key: 'coApplicantPan', group: 'Co-applicant information', label: 'Co-applicant PAN', type: 'text', get: (b) => b.coApplicantPan || '' },
+
+  // ── Nominee information ─────────────────────────────────────────────────
+  { key: 'nomineeName', group: 'Nominee information', label: 'Nominee name', type: 'text', get: (b) => b.nomineeName || '' },
+  { key: 'nomineeDob', group: 'Nominee information', label: 'Nominee date of birth', ...date((b) => b.nomineeDob) },
+  { key: 'nomineeAge', group: 'Nominee information', label: 'Nominee age', type: 'number', get: (b) => b.nomineeAge ?? '', align: 'right' },
+  { key: 'nomineeRelation', group: 'Nominee information', label: 'Nominee relation', type: 'text', get: (b) => b.nomineeRelation || '' },
+
+  // ── Bureau ───────────────────────────────────────────────────────────────
   { key: 'bureauScore', group: 'Bureau', label: 'Bureau score', type: 'number', get: (b) => b.bureauScore ?? '', cell: (b) => b.bureauScore ?? '—', align: 'right' },
   { key: 'bureauName', group: 'Bureau', label: 'Bureau', type: 'text', get: (b) => b.bureauName || '', cell: (b) => b.bureauName || '—' },
 ];
 
 const COL_BY_KEY = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
-const DEFAULT_VISIBLE = ['loanId', 'name', 'state', 'outstanding', 'odDays', 'status', 'bureauScore'];
+const DEFAULT_VISIBLE = [
+  'loanId',
+  'name',
+  'age',
+  'mobile',
+  'totalPrincipal',
+  'totalInterest',
+  'totalAmount',
+  'principalCollected',
+  'interestCollected',
+  'totalCollected',
+  'principalArrear',
+  'interestArrear',
+  'totalArrear',
+  'odDays',
+];
 
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 const CHECK_W = 36;
-const defaultWidth = (c) => {
-  if (['name'].includes(c.key)) return 170;
-  if (['product', 'district'].includes(c.key)) return 150;
-  if (c.type === 'number' || c.type === 'date') return 108;
-  return 130;
-};
+
+// Default column width = whichever is wider, the header label or the widest
+// value actually in the column — measured with canvas so headers and data
+// both show in full, without a resize, instead of a hardcoded per-column guess.
+const HEADER_FONT = '700 12px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+const DATA_FONT = '400 12px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+const HEADER_CHROME = 20 /* px-2.5 both sides */ + 34 /* sort arrow + filter icon */;
+const CELL_CHROME = 20 /* px-2.5 both sides */;
+const MIN_COL_W = 72;
+const MAX_COL_W = 280;
+let measureCtx = null;
+function measureText(text, font) {
+  if (!measureCtx) {
+    const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+    measureCtx = canvas ? canvas.getContext('2d') : { measureText: (s) => ({ width: s.length * 6.5 }) };
+  }
+  measureCtx.font = font;
+  return measureCtx.measureText(text).width;
+}
+const measureLabelWidth = (label) => measureText(label, HEADER_FONT);
+const defaultWidth = (c) => Math.max(MIN_COL_W, Math.ceil(measureLabelWidth(c.label) + HEADER_CHROME));
+// Plain-text version of what a cell shows, for width measurement — mirrors
+// each column's `cell` renderer without the JSX.
+function cellText(c, row) {
+  const raw = c.get(row);
+  if (c.key === 'odDays') return raw === 0 ? '—' : `${raw} d`;
+  if (c.money) return fmtI(raw);
+  if (c.type === 'date') return shortDate(raw);
+  return raw === '' || raw == null ? '—' : String(raw);
+}
+const alignClass = () => 'text-center';
 
 function TriCheck({ checked, indeterminate, onChange, title }) {
   const ref = useRef(null);
@@ -187,9 +284,10 @@ function ColumnMenu({ col, items, value, onChange, onSort, onClose }) {
   );
 }
 
-export default function LoansTable({ rows: allRows, onRowClick, renderAbove, renderToolbarActions }) {
-  const [visible, setVisible] = useState(DEFAULT_VISIBLE);
-  const [sort, setSort] = useState({ key: 'outstanding', dir: 'desc' });
+export default function LoansTable({ rows: allRows, onRowClick, renderAbove, renderToolbarActions, defaultVisible, highlightColumns }) {
+  const highlighted = useMemo(() => new Set(highlightColumns || []), [highlightColumns]);
+  const [visible, setVisible] = useState(defaultVisible || DEFAULT_VISIBLE);
+  const [sort, setSort] = useState({ key: 'totalArrear', dir: 'desc' });
   const [filters, setFilters] = useState({});
   const [openFilter, setOpenFilter] = useState(null);
   const [colsOpen, setColsOpen] = useState(false);
@@ -197,7 +295,22 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
   const [skip, setSkip] = useState(0);
   const [selected, setSelected] = useState(() => new Set());
   const [widths, setWidths] = useState({});
+  const [dragOverKey, setDragOverKey] = useState(null);
   const colsRef = useRef(null);
+  const dragKeyRef = useRef(null);
+
+  const hideColumn = (key) => setVisible((v) => (v.length > 1 ? v.filter((k) => k !== key) : v));
+  const reorderColumn = (from, to) =>
+    setVisible((v) => {
+      if (from === to) return v;
+      const arr = [...v];
+      const fromIdx = arr.indexOf(from);
+      const toIdx = arr.indexOf(to);
+      if (fromIdx === -1 || toIdx === -1) return v;
+      arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, from);
+      return arr;
+    });
 
   useEffect(() => {
     if (!colsOpen) return;
@@ -208,18 +321,32 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
 
   const cols = visible.map((k) => COL_BY_KEY[k]).filter(Boolean);
 
-  // contiguous group runs across the visible columns, for the banded header row
-  const groupSpans = [];
+  // marks the first column of each contiguous group run, for a thin divider
+  // between groups (e.g. loan info vs. applicant info) without a labeled row
   const groupStart = new Set();
+  let lastGroup;
   cols.forEach((c) => {
     const g = c.group || '';
-    const last = groupSpans[groupSpans.length - 1];
-    if (last && last.group === g) last.span += 1;
-    else {
-      groupSpans.push({ group: g, span: 1 });
-      groupStart.add(c.key);
-    }
+    if (g !== lastGroup) groupStart.add(c.key);
+    lastGroup = g;
   });
+
+  // Auto-fit width per column — whichever is wider, the header or the widest
+  // value in that column across all rows — capped so one outlier value can't
+  // blow a column out.
+  const autoWidths = useMemo(() => {
+    const m = {};
+    COLUMNS.forEach((c) => {
+      let maxDataW = 0;
+      allRows.forEach((r) => {
+        const w = measureText(cellText(c, r), DATA_FONT);
+        if (w > maxDataW) maxDataW = w;
+      });
+      const headerW = measureLabelWidth(c.label) + HEADER_CHROME;
+      m[c.key] = Math.max(MIN_COL_W, Math.min(MAX_COL_W, Math.ceil(Math.max(headerW, maxDataW + CELL_CHROME))));
+    });
+    return m;
+  }, [allRows]);
 
   const distinct = useMemo(() => {
     const m = {};
@@ -245,7 +372,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
     const needle = q.trim().toLowerCase();
     return allRows.filter((row) => {
       if (needle.length >= 2) {
-        const hay = `${row.name} ${row.loanId} ${row.refId} ${row.mobile}`.toLowerCase();
+        const hay = `${row.name} ${row.loanId} ${row.mobile}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return COLUMNS.every((c) => matchRow(c, filters[c.key], row));
@@ -322,7 +449,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
     });
   const clearSelection = () => setSelected(new Set());
 
-  const colW = (c) => widths[c.key] ?? defaultWidth(c);
+  const colW = (c) => widths[c.key] ?? autoWidths[c.key] ?? defaultWidth(c);
   const tableW = CHECK_W + cols.reduce((s, c) => s + colW(c), 0);
   function startResize(e, key, cur) {
     e.preventDefault();
@@ -354,7 +481,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
           className="w-72 max-w-full"
-          placeholder="Search name, loan ID, ref or mobile…"
+          placeholder="Search name, loan ID or mobile…"
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -362,7 +489,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
           }}
         />
         <div className="relative" ref={colsRef}>
-          <Button onClick={() => setColsOpen((v) => !v)}>▦ Columns ({visible.length})</Button>
+          <Button onClick={() => setColsOpen((v) => !v)}>▦ Columns ({visible.length}/{COLUMNS.length})</Button>
           {colsOpen && (
             <div className="absolute left-0 top-full z-[42] mt-1 max-h-96 w-64 overflow-y-auto rounded-[10px] border border-line bg-white p-2 shadow-pop">
               {GROUPS.map((group) => {
@@ -410,7 +537,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
                 <button className="text-[11px] font-semibold text-brand" onClick={() => setVisible(COLUMNS.map((c) => c.key))}>
                   Show all
                 </button>
-                <button className="text-[11px] font-semibold text-muted" onClick={() => setVisible(DEFAULT_VISIBLE)}>
+                <button className="text-[11px] font-semibold text-muted" onClick={() => setVisible(defaultVisible || DEFAULT_VISIBLE)}>
                   Reset
                 </button>
               </div>
@@ -453,10 +580,7 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
           </colgroup>
           <thead>
             <tr>
-              <th
-                rowSpan={2}
-                className="sticky top-0 z-30 border-b border-line bg-slate-50 px-2.5 py-1.5 text-center align-bottom"
-              >
+              <th className="sticky top-0 z-30 border-b border-line bg-slate-50 px-2.5 py-1.5 text-center align-bottom">
                 <TriCheck
                   checked={allSelected}
                   indeterminate={someSelected}
@@ -464,53 +588,75 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
                   title="Select all rows matching the current filters"
                 />
               </th>
-              {groupSpans.map((g, i) => (
-                <th
-                  key={g.group + i}
-                  colSpan={g.span}
-                  className={cx(
-                    'sticky top-0 z-20 h-7 whitespace-nowrap border-b border-line px-2.5 text-left text-[10px] font-extrabold uppercase tracking-[.06em]',
-                    GROUP_TINT[g.group] || 'bg-slate-100 text-slate-600',
-                    i > 0 && 'border-l border-line'
-                  )}
-                >
-                  {g.group}
-                </th>
-              ))}
-            </tr>
-            <tr>
               {cols.map((c) => {
                 const sortedHere = sort?.key === c.key;
                 const active = filterActive(filters[c.key]);
                 return (
                   <th
                     key={c.key}
+                    draggable
+                    onDragStart={(e) => {
+                      dragKeyRef.current = c.key;
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', c.key);
+                    }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      if (dragKeyRef.current && dragKeyRef.current !== c.key) setDragOverKey(c.key);
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = dragKeyRef.current;
+                      dragKeyRef.current = null;
+                      setDragOverKey(null);
+                      if (from) reorderColumn(from, c.key);
+                    }}
+                    onDragEnd={() => {
+                      dragKeyRef.current = null;
+                      setDragOverKey(null);
+                    }}
                     className={cx(
-                      'group relative sticky top-7 z-20 border-b border-line bg-slate-50 text-left font-bold',
-                      groupStart.has(c.key) && 'border-l border-line'
+                      'group relative sticky top-0 z-20 cursor-grab border-b border-line text-center font-bold active:cursor-grabbing',
+                      highlighted.has(c.key) ? 'bg-amber-100' : 'bg-slate-50',
+                      groupStart.has(c.key) && 'border-l border-line',
+                      dragOverKey === c.key && 'bg-brand/10'
                     )}
+                    title="Drag to reorder"
                   >
                     <button
-                      className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-slate-100"
+                      className="flex w-full items-center justify-center gap-1.5 px-5 py-1.5 hover:bg-slate-100"
                       onClick={() => setOpenFilter(openFilter === c.key ? null : c.key)}
                       title="Sort & filter"
                     >
                       <span className="truncate">{c.label}</span>
                       {sortedHere && <span className="shrink-0 text-[9px] text-brand">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
-                      <span
-                        className={cx(
-                          'ml-auto shrink-0 text-[10px] transition',
-                          active
-                            ? 'text-brand'
-                            : openFilter === c.key
-                            ? 'text-slate-500'
-                            : 'text-slate-300 opacity-0 group-hover:opacity-100'
-                        )}
-                      >
-                        {active ? '⚑' : '▾'}
-                      </span>
+                    </button>
+                    <button
+                      draggable={false}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        hideColumn(c.key);
+                      }}
+                      className="absolute left-1 top-1/2 -translate-y-1/2 shrink-0 rounded p-0.5 text-[11px] leading-none text-slate-300 opacity-0 transition hover:bg-slate-200 hover:text-brand group-hover:opacity-100"
+                      title="Hide column"
+                    >
+                      👁
                     </button>
                     <span
+                      className={cx(
+                        'pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 shrink-0 text-[10px] transition',
+                        active
+                          ? 'text-brand'
+                          : openFilter === c.key
+                          ? 'text-slate-500'
+                          : 'text-slate-300 opacity-0 group-hover:opacity-100'
+                      )}
+                    >
+                      {active ? '⚑' : '▾'}
+                    </span>
+                    <span
+                      draggable={false}
                       onMouseDown={(e) => startResize(e, c.key, colW(c))}
                       onClick={(e) => e.stopPropagation()}
                       className="absolute -right-[3px] top-0 z-10 h-full w-[6px] cursor-col-resize touch-none border-r-2 border-transparent hover:border-brand/50"
@@ -561,8 +707,9 @@ export default function LoansTable({ rows: allRows, onRowClick, renderAbove, ren
                       key={c.key}
                       className={cx(
                         'overflow-hidden text-ellipsis whitespace-nowrap px-2.5 py-2',
-                        c.align === 'right' && 'text-right',
-                        groupStart.has(c.key) && 'border-l border-[#edf1f5]'
+                        alignClass(c),
+                        groupStart.has(c.key) && 'border-l border-[#edf1f5]',
+                        highlighted.has(c.key) && 'bg-amber-50 font-semibold text-amber-800'
                       )}
                     >
                       {c.cell ? c.cell(b) : String(c.get(b) ?? '—') || '—'}

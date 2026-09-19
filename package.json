@@ -3,20 +3,26 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Dummy-data UI prototype of the Saralya Collections console — for design iteration, no backend.",
+  "description": "Dummy-data UI prototype of the Saralya Collections console — for design iteration, with a minimal SQLite-backed persistence server.",
   "scripts": {
     "dev": "vite",
+    "server": "node server/index.js",
+    "dev:full": "concurrently -n web,api -c blue,green \"vite\" \"node server/index.js\"",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.6",
+    "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.4",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.19",
     "vite": "^5.4.0"

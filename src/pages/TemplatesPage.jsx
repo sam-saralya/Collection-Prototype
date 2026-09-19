@@ -1,14 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useUI } from '../store.jsx';
 import {
-  Card, Button, PageHead, SectionTitle, Empty, Tag, Field, Input, Select, Textarea,
-  Modal, ModalHeader, Toggle, InfoNote, cx,
+  Card, Button, SectionTitle, Empty, Tag, Field, Input, Textarea,
+  Modal, ModalHeader, cx,
 } from '../ui.jsx';
-import { fmtDate } from '../lib.js';
 import { TEMPLATES } from '../data.js';
 
 const CHANNELS = ['WA', 'SMS', 'AI Bot call'];
-const CHANNEL_TAG = { WA: 'green', SMS: 'amber', 'AI Bot call': 'purple' };
 const CHANNEL_CODE = { WA: 'WA', SMS: 'SMS', 'AI Bot call': 'CALL' };
 
 const TEMPLATE_CATEGORIES = [
@@ -18,8 +16,6 @@ const TEMPLATE_CATEGORIES = [
 const CATEGORY_LABEL = { communication: 'Communication', auth: 'Authentication' };
 const CATEGORY_TAG = { communication: 'blue', auth: 'purple' };
 const DEFAULT_CATEGORY = 'communication';
-
-const empty = { template_id: '', template_message: '', channels: ['WA'], template_ids: {}, category: DEFAULT_CATEGORY, language: 'en', is_active: true };
 
 const PLACEHOLDERS = [
   { token: '$name', desc: "The borrower's name will be placed here", sample: 'Ramesh Kumar' },
@@ -33,6 +29,23 @@ const AUTH_PLACEHOLDERS = [
   { token: '$expiry', desc: 'How many minutes the code stays valid will be placed here', sample: '10' },
 ];
 
+function InfoTip({ text }) {
+  return (
+    <span className="group relative ml-1 inline-flex align-middle">
+      <span
+        tabIndex={0}
+        aria-label={text}
+        className="inline-flex h-[14px] w-[14px] cursor-help items-center justify-center rounded-full border border-muted text-[9px] font-bold normal-case text-muted"
+      >
+        i
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 hidden w-56 -translate-x-1/2 rounded-md bg-slate-800 px-2 py-1.5 text-[10.5px] font-normal normal-case leading-snug tracking-normal text-white shadow-lg group-hover:block group-focus-within:block">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function renderSample(msg, placeholders) {
   const order = [...placeholders].sort((a, b) => b.token.length - a.token.length);
   let out = msg || '';
@@ -44,30 +57,18 @@ function derivedTemplateId(baseId, channel, multi) {
   return `${baseId}_${CHANNEL_CODE[channel] || channel}`;
 }
 
-export default function TemplatesPage() {
+export default function TemplatesPage({ channels = CHANNELS }) {
   const { showToast } = useUI();
-  const [items, setItems] = useState(TEMPLATES);
-  const [fChannel, setFChannel] = useState('');
-  const [fCategory, setFCategory] = useState('');
-  const [fActive, setFActive] = useState('');
+  const empty = { template_id: '', dlt_template_id: '', template_message: '', channels: [channels[0]], template_ids: {}, category: DEFAULT_CATEGORY, language: 'en', is_active: true };
+  const [items, setItems] = useState(() => TEMPLATES.filter((t) => channels.includes(t.channel)));
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
-  const [bulkOpen, setBulkOpen] = useState(false);
   const msgRef = useRef(null);
 
   const activePlaceholders = form.category === 'auth' ? AUTH_PLACEHOLDERS : PLACEHOLDERS;
 
-  const filtered = useMemo(
-    () =>
-      items.filter((t) => {
-        if (fChannel && t.channel !== fChannel) return false;
-        if (fCategory && (t.category || DEFAULT_CATEGORY) !== fCategory) return false;
-        if (fActive && String(t.is_active !== false) !== fActive) return false;
-        return true;
-      }),
-    [items, fChannel, fCategory, fActive]
-  );
+  const filtered = items;
 
   function insertPlaceholder(token) {
     const el = msgRef.current;
@@ -93,6 +94,7 @@ export default function TemplatesPage() {
     setEditing(t);
     setForm({
       template_id: t.template_id || '',
+      dlt_template_id: t.dlt_template_id || '',
       template_message: t.template_message || '',
       channels: [t.channel || 'WA'],
       template_ids: {},
@@ -102,19 +104,12 @@ export default function TemplatesPage() {
     });
     setModalOpen(true);
   }
-  function toggleChannel(c) {
-    setForm((f) => {
-      const on = f.channels.includes(c);
-      if (on && f.channels.length === 1) return f;
-      return { ...f, channels: on ? f.channels.filter((x) => x !== c) : [...f.channels, c] };
-    });
-  }
   function save() {
     if (editing) {
       setItems((list) =>
         list.map((t) =>
           t._id === editing._id
-            ? { ...t, template_message: form.template_message, channel: form.channels[0], category: form.category, language: form.language, is_active: form.is_active, updatedAt: new Date().toISOString() }
+            ? { ...t, dlt_template_id: form.dlt_template_id, template_message: form.template_message, channel: form.channels[0], category: form.category, language: form.language, is_active: form.is_active, updatedAt: new Date().toISOString() }
             : t
         )
       );
@@ -123,6 +118,7 @@ export default function TemplatesPage() {
       const rows = form.channels.map((c) => ({
         _id: 't' + Math.random().toString(36).slice(2, 7),
         template_id: derivedTemplateId(form.template_id, c, form.channels.length > 1),
+        dlt_template_id: form.dlt_template_id,
         template_message: form.template_message,
         channel: c,
         category: form.category,
@@ -142,48 +138,11 @@ export default function TemplatesPage() {
 
   return (
     <div>
-      <PageHead
-        actions={
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setBulkOpen(true)}>⭱ Bulk upload CSV</Button>
-            <Button variant="primary" onClick={openCreate}>
-              ＋ New template
-            </Button>
-          </div>
-        }
-      />
-
-      <InfoNote>
-        <span className="font-mono">$name</span>-style placeholders <b>are</b> substituted at send time — the workflow
-        runner fills them from the borrower's own record. An <b>Authentication</b> template is the exception: it takes{' '}
-        <span className="font-mono">$otp</span> and <span className="font-mono">$expiry</span> instead.
-      </InfoNote>
-
       <Card pad>
         <SectionTitle title="Template registry" note={`${filtered.length} shown`}>
-          <div className="flex items-center gap-2">
-            <Select className="w-40" value={fChannel} onChange={(e) => setFChannel(e.target.value)}>
-              <option value="">All channels</option>
-              {CHANNELS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
-            <Select className="w-44" value={fCategory} onChange={(e) => setFCategory(e.target.value)}>
-              <option value="">All categories</option>
-              {TEMPLATE_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-            <Select className="w-32" value={fActive} onChange={(e) => setFActive(e.target.value)}>
-              <option value="">Any status</option>
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
-            </Select>
-          </div>
+          <Button variant="primary" onClick={openCreate}>
+            ＋ New template
+          </Button>
         </SectionTitle>
 
         {filtered.length === 0 ? (
@@ -193,13 +152,11 @@ export default function TemplatesPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Code</th>
+                  <th>Template name</th>
+                  <th>DLT Template ID</th>
                   <th>Message</th>
-                  <th>Channel</th>
                   <th>Category</th>
                   <th>Language</th>
-                  <th>Status</th>
-                  <th>Updated</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
@@ -207,11 +164,9 @@ export default function TemplatesPage() {
                 {filtered.map((t) => (
                   <tr key={t._id}>
                     <td className="font-mono text-[11px] font-semibold">{t.template_id}</td>
+                    <td className="font-mono text-[11px]">{t.dlt_template_id || <span className="text-muted">—</span>}</td>
                     <td className="max-w-[360px]">
                       <span className="line-clamp-2 text-slate-600">{t.template_message}</span>
-                    </td>
-                    <td>
-                      <Tag variant={CHANNEL_TAG[t.channel] || 'blue'}>{t.channel}</Tag>
                     </td>
                     <td>
                       <Tag variant={CATEGORY_TAG[t.category || DEFAULT_CATEGORY] || 'blue'}>
@@ -219,15 +174,10 @@ export default function TemplatesPage() {
                       </Tag>
                     </td>
                     <td>{t.language || 'en'}</td>
-                    <td>{t.is_active !== false ? <Tag variant="green">Active</Tag> : <Tag>Inactive</Tag>}</td>
-                    <td className="text-muted">{fmtDate(t.updatedAt)}</td>
                     <td>
-                      <div className="flex justify-end gap-2">
-                        <Button size="xs" onClick={() => openEdit(t)}>
-                          Edit
-                        </Button>
-                        <Button size="xs" variant="danger" onClick={() => remove(t)}>
-                          Delete
+                      <div className="flex justify-end">
+                        <Button size="xs" title="Edit template" aria-label="Edit template" onClick={() => openEdit(t)}>
+                          ✎ Edit
                         </Button>
                       </div>
                     </td>
@@ -242,22 +192,24 @@ export default function TemplatesPage() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)}>
         <ModalHeader
           title={editing ? 'Edit template' : 'New template'}
-          subtitle={editing ? editing.template_id : 'template_id must be globally unique'}
+          subtitle={editing ? editing.template_id : undefined}
           onClose={() => setModalOpen(false)}
         />
         <div className="space-y-3.5">
-          <Field label="Template ID" required hint="e.g. WA_01_EMI — cannot be changed after creation">
+          <Field label="Template name" hint="e.g. emi_due_reminder — cannot be changed after creation">
             <Input
               value={form.template_id}
               disabled={!!editing}
               onChange={(e) => setForm({ ...form, template_id: e.target.value })}
-              placeholder="WA_01_EMI"
+              placeholder="emi_due_reminder"
               className={cx(editing && 'opacity-60')}
             />
           </Field>
+          <Field label={<>DLT Template ID <InfoTip text="The template ID registered with your DLT operator portal" /></>}>
+            <Input value={form.dlt_template_id} onChange={(e) => setForm({ ...form, dlt_template_id: e.target.value })} placeholder="1107161234567890123" />
+          </Field>
           <Field
             label="Message"
-            required
             hint={
               form.category === 'auth'
                 ? 'Filled in when a borrower-portal OTP is sent.'
@@ -292,14 +244,9 @@ export default function TemplatesPage() {
             <div className="mt-3 rounded-xl border border-line bg-slate-50/70 p-3">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-[.06em] text-muted">Sample preview</span>
-                {form.channels.map((c) => (
-                  <Tag key={c} variant={CHANNEL_TAG[c] || 'blue'}>
-                    {c}
-                  </Tag>
-                ))}
               </div>
               {form.template_message.trim() ? (
-                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-emerald-500 px-3 py-2 text-[12.5px] leading-relaxed text-white shadow-sm">
+                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm border border-line bg-white px-3 py-2 text-[12.5px] leading-relaxed text-ink shadow-sm">
                   {renderSample(form.template_message, activePlaceholders)}
                 </div>
               ) : (
@@ -307,7 +254,7 @@ export default function TemplatesPage() {
               )}
             </div>
           </Field>
-          <Field label="Category" required hint={TEMPLATE_CATEGORIES.find((c) => c.value === form.category)?.hint}>
+          <Field label="Category" hint={TEMPLATE_CATEGORIES.find((c) => c.value === form.category)?.hint}>
             <div className="flex flex-wrap gap-2">
               {TEMPLATE_CATEGORIES.map((c) => {
                 const on = form.category === c.value;
@@ -328,99 +275,23 @@ export default function TemplatesPage() {
               })}
             </div>
           </Field>
-          {editing ? (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Channel" required>
-                <Select value={form.channels[0]} onChange={(e) => setForm({ ...form, channels: [e.target.value] })}>
-                  {CHANNELS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Language">
-                <Input value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} placeholder="en" />
-              </Field>
-            </div>
-          ) : (
-            <>
-              <Field label="Channels" required hint="Pick one or more — a separate template is stored per channel.">
-                <div className="flex flex-wrap gap-2">
-                  {CHANNELS.map((c) => {
-                    const on = form.channels.includes(c);
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => toggleChannel(c)}
-                        className={cx(
-                          'rounded-full border px-3 py-1.5 text-[12px] font-semibold transition',
-                          on ? 'border-brand bg-brand/10 text-brand' : 'border-line bg-white text-slate-500 hover:border-brand/40'
-                        )}
-                      >
-                        <span className="mr-1.5">{on ? '✓' : '＋'}</span>
-                        {c}
-                      </button>
-                    );
-                  })}
-                </div>
-              </Field>
-              <Field label="Language">
-                <Input className="w-40" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} placeholder="en" />
-              </Field>
-            </>
-          )}
-          <div className="flex items-center justify-between rounded-[10px] border border-line bg-slate-50/60 px-3 py-2.5">
-            <div>
-              <b className="text-[12px]">Active</b>
-              <div className="text-[10px] text-muted">Inactive templates stay in the registry but are filtered out by default.</div>
-            </div>
-            <Toggle on={form.is_active} onClick={() => setForm({ ...form, is_active: !form.is_active })} />
-          </div>
         </div>
-        <div className="mt-5 flex justify-end gap-2.5">
+        <div className="mt-5 flex items-center justify-end gap-2.5">
+          {editing && (
+            <Button
+              variant="danger"
+              className="mr-auto"
+              onClick={() => {
+                remove(editing);
+                setModalOpen(false);
+              }}
+            >
+              Delete
+            </Button>
+          )}
           <Button onClick={() => setModalOpen(false)}>Cancel</Button>
           <Button variant="primary" disabled={!form.template_id || !form.template_message || !form.channels.length} onClick={save}>
             {editing ? 'Save changes' : form.channels.length > 1 ? `Create ${form.channels.length} templates` : 'Create template'}
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={bulkOpen} onClose={() => setBulkOpen(false)} size="lg">
-        <ModalHeader title="Bulk upload templates" subtitle="Import many templates at once from a CSV or Excel file" onClose={() => setBulkOpen(false)} />
-        <div className="space-y-3.5">
-          <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-slate-50/70 p-3">
-            <div>
-              <b className="text-[12px]">Start from the sample</b>
-              <div className="mt-0.5 text-[11px] leading-snug text-muted">
-                Columns: <span className="font-mono">template_id</span>, <span className="font-mono">template_message</span>,{' '}
-                <span className="font-mono">channels</span>, <span className="font-mono">category</span>,{' '}
-                <span className="font-mono">language</span>, <span className="font-mono">is_active</span>.
-              </div>
-            </div>
-            <Button className="shrink-0" onClick={() => showToast('Sample CSV downloaded', 'success')}>
-              ⭳ Sample CSV
-            </Button>
-          </div>
-          <Field label="File" required hint="CSV, XLSX or XLS. The first sheet is read.">
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls,text/csv"
-              className="block w-full cursor-pointer rounded-[10px] border border-line bg-white px-3 py-2 text-[12px] text-slate-600 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-brand/10 file:px-3 file:py-1.5 file:text-[12px] file:font-semibold file:text-brand"
-            />
-          </Field>
-        </div>
-        <div className="mt-5 flex justify-end gap-2.5">
-          <Button onClick={() => setBulkOpen(false)}>Cancel</Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setBulkOpen(false);
-              showToast('Imported 6 templates', 'success');
-            }}
-          >
-            Import templates
           </Button>
         </div>
       </Modal>

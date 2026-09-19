@@ -1,20 +1,22 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { useUI } from '../../store.jsx';
-import { ALL_ORGANIZATIONS, genPassword } from '../../data.js';
+import { fmtI } from '../../lib.js';
+import { ALL_ORGANIZATIONS, WALLET_PURPOSE_BY_KEY, genPassword } from '../../data.js';
 
 // A small store scoped to the Saralya super-admin ("staff") console.
 // It owns the section nav and the in-memory list of tenant organizations that
 // the Organizations page and the Onboard page both work with.
 
 export const STAFF_NAV = [
-  { key: 'organizations', label: 'Organizations', icon: '◫' },
-  { key: 'onboard', label: 'Onboard organization', icon: '＋' },
+  { key: 'organizations', label: 'Tenant', icon: '◫' },
+  { key: 'onboard', label: 'Onboard tenant', icon: '＋' },
   { key: 'billing', label: 'Pricing & billing', icon: '₹' },
   { key: 'ivr', label: 'IVR & scripts', icon: '☎' },
   { key: 'whatsapp', label: 'WhatsApp / Meta', icon: '💬' },
-  { key: 'audit', label: 'Audit log', icon: '❋' },
-  { key: 'health', label: 'Delivery & health', icon: '☰' },
-  { key: 'platform', label: 'Platform settings', icon: '⚙' },
+  { key: 'quadrantRules', label: 'Quadrant rules', icon: '◧' },
+  { key: 'audit', label: 'Audit log', icon: '❋', soon: true },
+  { key: 'health', label: 'Delivery & health', icon: '☰', soon: true },
+  { key: 'platform', label: 'Platform settings', icon: '⚙', soon: true },
 ];
 
 const StaffContext = createContext(null);
@@ -22,6 +24,7 @@ const StaffContext = createContext(null);
 export function StaffProvider({ children }) {
   const { showToast } = useUI();
   const [section, setSection] = useState('organizations');
+  const [viewOrgId, setViewOrgId] = useState(null);
   const [organizations, setOrganizations] = useState(ALL_ORGANIZATIONS);
   // The org shown in the "just created" success panel on the Onboard page.
   const [lastCreated, setLastCreated] = useState(null);
@@ -53,9 +56,29 @@ export function StaffProvider({ children }) {
   const toggleActive = useCallback(
     (org) => {
       patchOrg(org._id, { is_active: org.is_active === false });
-      showToast(org.is_active === false ? 'Organization reinstated' : 'Organization suspended', 'success');
+      showToast(org.is_active === false ? 'Tenant reinstated' : 'Tenant suspended', 'success');
     },
     [patchOrg, showToast]
+  );
+
+  // Grants wallet credit to a tenant — a paid recharge reconciled outside the
+  // app, or a free demo/promotional grant. Distinct from the org's own
+  // self-service "Top up" (org-admin console), which is always `recharge`.
+  const addWalletCredit = useCallback(
+    (org, { amount, purpose, note }) => {
+      setOrganizations((list) =>
+        list.map((o) => {
+          if (o._id !== org._id) return o;
+          const wallet = o.wallet || { balance: 0, currency: 'INR', low_balance_threshold: 0, auto_recharge: { enabled: false }, transactions: [] };
+          const balance = wallet.balance + amount;
+          const at = new Date().toISOString();
+          const tx = { id: 'wtx_' + Date.now(), type: 'credit', purpose, amount, balance_after: balance, note: note || WALLET_PURPOSE_BY_KEY[purpose]?.label, at };
+          return { ...o, wallet: { ...wallet, balance, updated_at: at, transactions: [tx, ...wallet.transactions] } };
+        })
+      );
+      showToast(`${fmtI(amount)} ${WALLET_PURPOSE_BY_KEY[purpose]?.label.toLowerCase()} added to ${org.name}`, 'success');
+    },
+    [showToast]
   );
 
   // Called by the Onboard page. `payload` carries the full company profile,
@@ -119,6 +142,8 @@ export function StaffProvider({ children }) {
     () => ({
       section,
       setSection,
+      viewOrgId,
+      setViewOrgId,
       organizations,
       lastCreated,
       setLastCreated,
@@ -126,10 +151,11 @@ export function StaffProvider({ children }) {
       patchOb,
       resendInvite,
       toggleActive,
+      addWalletCredit,
       createOrg,
       showToast,
     }),
-    [section, organizations, lastCreated, patchOrg, patchOb, resendInvite, toggleActive, createOrg, showToast]
+    [section, viewOrgId, organizations, lastCreated, patchOrg, patchOb, resendInvite, toggleActive, addWalletCredit, createOrg, showToast]
   );
 
   return <StaffContext.Provider value={value}>{children}</StaffContext.Provider>;

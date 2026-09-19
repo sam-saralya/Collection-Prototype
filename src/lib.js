@@ -217,3 +217,98 @@ export const REJECT_LABELS = {
   missing_coapplicant: 'No co-applicant details',
   invalid_coapplicant_mobile: 'Invalid co-applicant mobile',
 };
+
+/* ---------------------------------------------------------- quadrant rules
+ * Staff-configurable parameters behind the Ability × Intent split (see
+ * CATEGORIES above). Each parameter checks one field from the loan import
+ * schema against a threshold and returns a pass/fail — never a final label.
+ * An axis can carry any number of parameters; they're combined by weight, not
+ * by priority, so when several disagree, the ones the admin trusts more (a
+ * higher weight) decide which way the axis score leans before it's banded at
+ * the threshold.
+ *
+ * Ability = point-in-time repayment capacity (credit score, current
+ * delinquency, how much of the loan is still outstanding). Intent =
+ * behavioural track record (share of installments actually honoured, recency
+ * of the last payment, recency of the last contact) — deliberately a
+ * different kind of signal from ability, so the two axes can genuinely
+ * disagree.
+ */
+export const APP_TODAY = '2026-09-17';
+
+export const QUADRANT_PARAM_DEFS = {
+  ability: [
+    { key: 'bureauScore', label: 'Bureau score', sourceField: 'BUREAU_SCORE', comparator: 'gte', unit: '', defaultValue: 650, defaultWeight: 40 },
+    { key: 'odDays', label: 'Days past due', sourceField: 'OD_DAYS', comparator: 'lte', unit: 'days', defaultValue: 30, defaultWeight: 35 },
+    { key: 'exposureRatio', label: 'Exposure ratio', sourceField: 'TOTAL_OUTSTANDING ÷ TOTAL_PRINCIPAL', comparator: 'lte', unit: '%', defaultValue: 70, defaultWeight: 25 },
+  ],
+  intent: [
+    { key: 'paidRatio', label: 'Installments paid', sourceField: 'PAID_INSTALLMENT ÷ TOTAL_INSTALLMENT', comparator: 'gte', unit: '%', defaultValue: 60, defaultWeight: 40 },
+    { key: 'daysSinceColl', label: 'Days since last collection', sourceField: 'LAST_COLL_DATE', comparator: 'lte', unit: 'days', defaultValue: 45, defaultWeight: 35 },
+    { key: 'daysSinceContact', label: 'Days since last contact', sourceField: 'LAST_CONTACT_DATE', comparator: 'lte', unit: 'days', defaultValue: 20, defaultWeight: 25 },
+  ],
+};
+
+export const DEFAULT_QUADRANT_RULES = {
+  ability: {
+    threshold: 50,
+    weights: { bureauScore: 40, odDays: 35, exposureRatio: 25 },
+    values: { bureauScore: 650, odDays: 30, exposureRatio: 70 },
+  },
+  intent: {
+    threshold: 50,
+    weights: { paidRatio: 40, daysSinceColl: 35, daysSinceContact: 25 },
+    values: { paidRatio: 60, daysSinceColl: 45, daysSinceContact: 20 },
+  },
+};
+
+export function daysBetween(fromISO, toISO = APP_TODAY) {
+  return Math.round((new Date(toISO) - new Date(fromISO)) / 86400000);
+}
+
+// Reads a parameter's raw metric off a borrower row — the one place that
+// knows how each configurable parameter maps onto the loan schema.
+export function paramMetric(borrower, axis, key) {
+  if (axis === 'ability') {
+    if (key === 'bureauScore') return borrower.bureauScore; // null when no bureau pull
+    if (key === 'odDays') return borrower.odDays;
+    if (key === 'exposureRatio') {
+      return borrower.principal ? Math.round((borrower.outstanding / borrower.principal) * 100) : null;
+    }
+  }
+  if (axis === 'intent') {
+    if (key === 'paidRatio') {
+      return borrower.totalInstallment ? Math.round((borrower.paidInstallment / borrower.totalInstallment) * 100) : null;
+    }
+    if (key === 'daysSinceColl') return borrower.lastCollDate ? daysBetween(borrower.lastCollDate) : null;
+    if (key === 'daysSinceContact') return borrower.lastContactDate ? daysBetween(borrower.lastContactDate) : null;
+  }
+  return null;
+}
+
+function passesComparator(value, comparator, threshold) {
+  if (value == null) return false; // missing data never counts as a pass
+  return comparator === 'gte' ? value >= threshold : value <= threshold;
+}
+
+// Scores one axis for one borrower under a given rule config. Any number of
+// parameters is supported: the score is their pass/fail verdicts averaged by
+// weight (normalised by however the weights actually sum, so they don't have
+// to add up to 100 themselves), then banded at the threshold. Returns each
+// parameter's own verdict + effective share so the UI can show exactly where
+// they agreed or disagreed.
+export function computeAxisScore(borrower, axis, rules) {
+  const defs = QUADRANT_PARAM_DEFS[axis];
+  const totalWeight = defs.reduce((s, p) => s + (rules.weights[p.key] || 0), 0) || 1;
+  const params = {};
+  let weightedSum = 0;
+  defs.forEach((p) => {
+    const value = paramMetric(borrower, axis, p.key);
+    const pass = passesComparator(value, p.comparator, rules.values[p.key]);
+    const weight = rules.weights[p.key] || 0;
+    params[p.key] = { value, pass, weight, share: Math.round((weight / totalWeight) * 100) };
+    weightedSum += weight * (pass ? 100 : 0);
+  });
+  const score = weightedSum / totalWeight;
+  return { score, band: score >= rules.threshold ? 'high' : 'low', params };
+}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Card, Button, PageHead, SectionTitle, Field, Input, Select, Textarea, Tag, InfoNote, cx } from '../../ui.jsx';
+import { Card, Button, PageHead, SectionTitle, Field, Input, Select, Textarea, Tag, cx } from '../../ui.jsx';
 import { useStaff } from './store.jsx';
 import { JustCreatedCard } from './shared.jsx';
 
@@ -130,7 +130,7 @@ export default function OnboardOrgPage() {
                 setSection('organizations');
               }}
             >
-              Go to Organizations
+              Go to Tenants
             </Button>
             <Button onClick={() => setLastCreated(null)}>Onboard another</Button>
           </div>
@@ -159,7 +159,7 @@ export default function OnboardOrgPage() {
   return (
     <form onSubmit={submit}>
       <PageHead
-        title="Onboard an organization"
+        title="Onboard a tenant"
         actions={
           <div className="flex items-center gap-2">
             <Button type="button" onClick={() => setSection('organizations')}>
@@ -320,11 +320,6 @@ export default function OnboardOrgPage() {
               </Field>
             </div>
           </Card>
-
-          <InfoNote tone="blue">
-            After create: the tenant shows under <b>Onboarding</b> with its email-delivery status, a <b>Resend invite</b>
-            action, and a break-glass <b>Reveal password</b> for when email is down.
-          </InfoNote>
         </div>
       </div>
 

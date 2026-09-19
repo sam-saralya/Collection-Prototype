@@ -1,29 +1,35 @@
 import React, { useState } from 'react';
-import OrganizationPage from './OrganizationPage.jsx';
 import TeamCard from '../components/TeamCard.jsx';
-import BorrowerLinksCard from '../components/BorrowerLinksCard.jsx';
 import OrgBillingCard from '../components/OrgBillingCard.jsx';
+import TemplatesPage from './TemplatesPage.jsx';
+import WhatsAppAdminPage from './WhatsAppAdminPage.jsx';
+import ApiLogsPage from './ApiLogsPage.jsx';
 import { cx } from '../ui.jsx';
 
 // The org-admin console. Its own shell + sidebar; the Org Admin manages the
-// tenant here — organisation details, the people in it, borrower links and
-// what each service costs / what it's billing per project.
+// tenant here — organisation details, the people in it,
+// message/WhatsApp/IVR templates and what each service costs / what it's
+// billing per project.
 const NAV = [
-  { key: 'organization', label: 'Organization', icon: '⌂' },
   { key: 'users', label: 'Users & roles', icon: '☰' },
-  { key: 'links', label: 'Borrower links', icon: '🔗' },
+  { key: 'templates', label: 'Message Templates', icon: '✦' },
+  { key: 'whatsappAdmin', label: 'WhatsApp Templates', icon: '✎' },
+  { key: 'ivrTemplates', label: 'IVR Call Templates', icon: '☎' },
+  { key: 'apiLogs', label: 'API logs', icon: '❋' },
   { key: 'billing', label: 'Pricing & billing', icon: '₹' },
 ];
 
 const TITLES = {
-  organization: 'Organization',
   users: 'Users & roles',
-  links: 'Borrower links',
+  templates: 'Message Templates',
+  whatsappAdmin: 'WhatsApp Templates',
+  ivrTemplates: 'IVR Call Templates',
+  apiLogs: 'API logs',
   billing: 'Pricing & billing',
 };
 
 export default function OrgAdminPage() {
-  const [section, setSection] = useState('organization');
+  const [section, setSection] = useState('users');
 
   return (
     <div className="grid min-h-screen grid-cols-[220px_1fr] max-[860px]:grid-cols-[60px_1fr]">
@@ -68,9 +74,11 @@ export default function OrgAdminPage() {
           <button className="btn whitespace-nowrap">Logout</button>
         </header>
         <div className="mx-auto max-w-[1200px] p-7 max-[860px]:p-4">
-          {section === 'organization' && <OrganizationPage />}
           {section === 'users' && <TeamCard canManage />}
-          {section === 'links' && <BorrowerLinksCard />}
+          {section === 'templates' && <TemplatesPage channels={['WA', 'SMS']} />}
+          {section === 'ivrTemplates' && <TemplatesPage channels={['AI Bot call']} />}
+          {section === 'whatsappAdmin' && <WhatsAppAdminPage />}
+          {section === 'apiLogs' && <ApiLogsPage />}
           {section === 'billing' && <OrgBillingCard />}
         </div>
       </main>

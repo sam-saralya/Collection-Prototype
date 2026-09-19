@@ -1,9 +1,58 @@
 import React, { useState } from 'react';
 import { useUI } from '../../store.jsx';
-import { Button, Field, Modal, ModalHeader, Tag } from '../../ui.jsx';
-import { fmtDate } from '../../lib.js';
+import { Button, Field, Input, Select, Textarea, Modal, ModalHeader, Tag } from '../../ui.jsx';
+import { fmtDate, fmtI } from '../../lib.js';
+import { WALLET_PURPOSES } from '../../data.js';
 
 /* ------------------------------------------------------------------ helpers */
+
+// Draft/saved pair for forms that stay locked until "Edit" is pressed.
+export function useDraft(initial) {
+  const [saved, setSaved] = useState(initial);
+  const [draft, setDraft] = useState(initial);
+  return { draft, setDraft, commit: () => setSaved(draft), reset: () => setDraft(saved) };
+}
+
+// Locks everything inside (native `disabled` on the fieldset) until the user
+// presses Edit. Save shows a toast and locks again; Cancel calls onCancel to
+// throw the draft away.
+export function EditGate({ label = 'changes', onSave, onCancel, invalid, children }) {
+  const { showToast } = useUI();
+  const [editing, setEditing] = useState(false);
+  const save = () => {
+    if (invalid) return showToast(invalid, 'error');
+    onSave?.();
+    setEditing(false);
+    showToast(`${label} saved`, 'success');
+  };
+  const cancel = () => {
+    onCancel?.();
+    setEditing(false);
+  };
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-end gap-2">
+        {editing ? (
+          <>
+            <span className="mr-auto text-[11px] font-semibold text-amber-700">Editing — changes apply once you save</span>
+            <Button onClick={cancel}>Cancel</Button>
+            <Button variant="primary" onClick={save}>Save changes</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="primary" className="ml-auto" onClick={() => setEditing(true)}>✎ Edit</Button>
+          </>
+        )}
+      </div>
+      <fieldset
+        disabled={!editing}
+        className="contents [&:disabled_input]:cursor-not-allowed [&:disabled_input]:bg-slate-50 [&:disabled_input]:text-slate-500 [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50 [&:disabled_textarea]:cursor-not-allowed [&:disabled_textarea]:bg-slate-50"
+      >
+        {children}
+      </fieldset>
+    </div>
+  );
+}
 
 export function relTime(iso) {
   if (!iso) return '';
@@ -129,6 +178,67 @@ export function RevealPasswordModal({ open, org, onClose }) {
 
       <div className="mt-5 flex justify-end">
         <Button onClick={close}>Done</Button>
+      </div>
+    </Modal>
+  );
+}
+
+/* --------------------------------------------------------- wallet credit */
+
+export function WalletCreditModal({ open, org, onClose, onConfirm }) {
+  const [amount, setAmount] = useState('');
+  const [purpose, setPurpose] = useState(WALLET_PURPOSES[0].key);
+  const [note, setNote] = useState('');
+  const value = Number(amount) || 0;
+  const purposeInfo = WALLET_PURPOSES.find((p) => p.key === purpose);
+  const balance = org?.wallet?.balance ?? 0;
+
+  const close = () => {
+    setAmount('');
+    setPurpose(WALLET_PURPOSES[0].key);
+    setNote('');
+    onClose();
+  };
+
+  return (
+    <Modal open={open} onClose={close} size="sm">
+      <ModalHeader title="Add wallet credit" subtitle={org?.name} onClose={close} />
+
+      <p className="mb-3 text-[11px] text-muted">
+        Current balance <b className={balance < 0 ? 'text-danger' : 'text-ink'}>{fmtI(balance)}</b>
+      </p>
+
+      <Field label="Purpose" required>
+        <Select value={purpose} onChange={(e) => setPurpose(e.target.value)}>
+          {WALLET_PURPOSES.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {purposeInfo && <p className="mt-1 text-[10.5px] leading-relaxed text-muted">{purposeInfo.hint}</p>}
+
+      <Field label="Amount" className="mt-3" required>
+        <Input type="number" min="0" placeholder="₹ amount to credit" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+      </Field>
+
+      <Field label="Note" className="mt-3" hint="Optional — shown against this entry in the tenant's wallet history.">
+        <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={purposeInfo?.label} />
+      </Field>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button onClick={close}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={value <= 0}
+          onClick={() => {
+            onConfirm({ amount: value, purpose, note: note.trim() || null });
+            close();
+          }}
+        >
+          Add {value > 0 ? fmtI(value) : 'credit'}
+        </Button>
       </div>
     </Modal>
   );

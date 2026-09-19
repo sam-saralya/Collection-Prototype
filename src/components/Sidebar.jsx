@@ -1,7 +1,6 @@
 import React from 'react';
 import { useUI, NAV_GROUPS } from '../store.jsx';
 import { cx } from '../ui.jsx';
-import { CURRENT_USER } from '../data.js';
 
 export default function Sidebar() {
   const { navSection, setSection } = useUI();
@@ -44,16 +43,6 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <div className="mt-auto rounded-2xl border border-[#1f2d47] bg-sidebar2 p-3.5 max-[860px]:hidden">
-        <div className="flex items-center justify-between">
-          <b className="truncate text-xs">Sugam Finance</b>
-          <span className="flex items-center gap-1.5 text-[10px] text-[#8291ae]">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" /> LIVE
-          </span>
-        </div>
-        <small className="mt-1.5 block leading-relaxed text-[#8291ae]">Signed in as {CURRENT_USER.email}</small>
-      </div>
     </aside>
   );
 }

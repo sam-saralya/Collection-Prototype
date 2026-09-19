@@ -4,10 +4,15 @@ import {
   Card, Button, PageHead, SectionTitle, Empty, Tag, Field, Input, Select, Textarea,
   Modal, ModalHeader, Drawer, DrawerHeader, ErrorBanner, InfoNote, cx,
 } from '../ui.jsx';
-import { WORKFLOWS, TEMPLATES, JOURNEYS, WF_SIMULATE } from '../data.js';
+import { WORKFLOWS, TEMPLATES, WF_SIMULATE } from '../data.js';
 
 const CHANNEL_TAG = { WA: 'green', SMS: 'amber', 'AI Bot call': 'purple' };
 const DOT_COLOR = { WA: '#16a34a', SMS: '#f59e0b', 'AI Bot call': '#7c3aed' };
+const CHANNEL_SECTIONS = [
+  { key: 'WA', label: 'WhatsApp' },
+  { key: 'SMS', label: 'SMS' },
+  { key: 'AI Bot call', label: 'IVR' },
+];
 const offsetLabel = (n) => (n === 0 ? 'T' : n > 0 ? `T + ${n}` : `T − ${Math.abs(n)}`);
 const ORDINAL = (n) => {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -108,26 +113,6 @@ function TimelineColumn({ label, sublabel, labelColor, dotColor, children, muted
       </div>
       <div className="mx-auto h-4 w-[2px] bg-slate-300" />
       {children}
-    </div>
-  );
-}
-
-function CycleStepper({ cycle, onChange }) {
-  const isNow = cycle.year === new Date().getFullYear() && cycle.monthIndex === new Date().getMonth();
-  return (
-    <div className="flex items-center gap-1.5">
-      <Button size="xs" onClick={() => onChange(shiftCycle(cycle, -1))}>
-        ‹
-      </Button>
-      <span className="min-w-[110px] text-center text-[11.5px] font-bold">{cycleLabel(cycle)}</span>
-      <Button size="xs" onClick={() => onChange(shiftCycle(cycle, 1))}>
-        ›
-      </Button>
-      {!isNow && (
-        <Button size="xs" variant="soft" onClick={() => onChange(thisCycle())}>
-          Today
-        </Button>
-      )}
     </div>
   );
 }
@@ -234,7 +219,6 @@ function CadenceTimeline({ rules, referenceDate, runTime, anchorNote, onAdd, onE
 export default function WorkflowsPage() {
   const { showToast } = useUI();
   const templates = TEMPLATES;
-  const journeys = JOURNEYS.filter((j) => j.is_active);
 
   const [workflows, setWorkflows] = useState(WORKFLOWS);
   const [fActive, setFActive] = useState('');
@@ -473,12 +457,9 @@ export default function WorkflowsPage() {
               {selected.remark && <p className="mb-4 text-[12px] text-slate-600">{selected.remark}</p>}
 
               <SectionTitle title="Cadence timeline" note={`${selected.rules?.length ?? 0} rule(s) · repeats monthly`}>
-                <div className="flex items-center gap-2">
-                  <CycleStepper cycle={cycle} onChange={setCycle} />
-                  <Button size="xs" variant="soft" onClick={() => openAddRule()}>
-                    ＋ Add event
-                  </Button>
-                </div>
+                <Button size="xs" variant="soft" onClick={() => openAddRule()}>
+                  ＋ Add event
+                </Button>
               </SectionTitle>
 
               <CadenceTimeline
@@ -557,34 +538,26 @@ export default function WorkflowsPage() {
                 <TimeSelect value={ruleForm.run_time} onChange={(v) => setRuleForm({ ...ruleForm, run_time: v })} />
               </Field>
               <Field label="Templates" required hint="A rule can fire several at once (e.g. WhatsApp + SMS)">
-                <div className="max-h-44 space-y-1.5 overflow-y-auto rounded-[10px] border border-line p-2">
-                  {templates.map((t) => (
-                    <label key={t._id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] hover:bg-slate-50">
-                      <input type="checkbox" checked={ruleForm.templates.includes(t._id)} onChange={() => toggleTemplate(t._id)} />
-                      <Tag variant={CHANNEL_TAG[t.channel] || 'blue'}>{t.channel}</Tag>
-                      <span className="font-mono text-[11px]">{t.template_id}</span>
-                      <span className="truncate text-muted">— {t.template_message}</span>
-                    </label>
-                  ))}
+                <div className="max-h-56 space-y-3 overflow-y-auto rounded-[10px] border border-line p-2">
+                  {CHANNEL_SECTIONS.map(({ key, label }) => {
+                    const group = templates.filter((t) => t.channel === key);
+                    if (!group.length) return null;
+                    return (
+                      <div key={key}>
+                        <div className="mb-1 px-1 text-[10px] font-extrabold uppercase tracking-[.08em] text-muted">{label}</div>
+                        <div className="space-y-1.5">
+                          {group.map((t) => (
+                            <label key={t._id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] hover:bg-slate-50">
+                              <input type="checkbox" checked={ruleForm.templates.includes(t._id)} onChange={() => toggleTemplate(t._id)} />
+                              <span className="font-mono text-[11px]">{t.template_id}</span>
+                              <span className="truncate text-muted">— {t.template_message}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </Field>
-              <Field label="Follow-up journey" hint="After this message goes out, react to what the borrower does.">
-                <Select value={ruleForm.journey} onChange={(e) => setRuleForm({ ...ruleForm, journey: e.target.value })}>
-                  <option value="">None — send and move on</option>
-                  {journeys.map((j) => (
-                    <option key={j._id} value={j._id}>
-                      {j.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {ruleForm.journey && (
-                <div className="rounded-[10px] border border-blue-200 bg-blue-50 px-3 py-2 text-[11.5px] text-blue-900">
-                  While this journey is running, the workflow's <b>later</b> rules will skip these borrowers.
-                </div>
-              )}
-              <Field label="Remark">
-                <Input value={ruleForm.remark} onChange={(e) => setRuleForm({ ...ruleForm, remark: e.target.value })} />
               </Field>
               {ruleErr && <ErrorBanner>{ruleErr}</ErrorBanner>}
             </div>

@@ -476,6 +476,10 @@ export default function WhatsAppAdminPage() {
 
   return (
     <div>
+      {/* TODO: WhatsApp templates flow is NOT final — will finalize after consulting Shudhanshu. */}
+      <div className="mb-4 rounded-[10px] border-2 border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-[14px] font-extrabold uppercase tracking-wide text-amber-800">
+        TODO — WhatsApp templates: will finalize after consulting Shudhanshu
+      </div>
       {showGuide && <MetaGuide onClose={() => setShowGuide(false)} />}
 
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">

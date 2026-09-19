@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useUI } from '../store.jsx';
-import { Card, Button, PageHead, SectionTitle, Empty, Tag, Drawer, DrawerHeader, cx } from '../ui.jsx';
+import { Card, Button, PageHead, SectionTitle, Empty, Tag, Modal, ModalHeader, Field, Select, cx } from '../ui.jsx';
 import { fmt, fmtDate, exportCsv, IVR_CALL_OUTCOMES } from '../lib.js';
-import { BORROWERS, PIPELINE_ACTION_BY_KEY, SEGMENT_OPERATORS, DAYS_OF_WEEK, TEMPLATES } from '../data.js';
+import { BORROWERS, PIPELINE_ACTION_BY_KEY, SEGMENT_OPERATORS, DAYS_OF_WEEK, TEMPLATES, CURRENT_USER } from '../data.js';
 
 const DAY_LABEL_BY_KEY = Object.fromEntries(DAYS_OF_WEEK.map((d) => [d.key, d.label]));
 const TABS = [
@@ -12,10 +12,10 @@ const TABS = [
 const newRunId = () => `run_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 
 /* ════════════════════════════════════════════════════════════════════════
- * Pipelines list — cards for each saved pipeline (built in the standalone
- * PipelineBuilderPage) with Edit / Run / delete. Running walks the graph
+ * Pipelines list — a table of each saved pipeline (built in the standalone
+ * PipelineBuilderPage) with Edit / Run. Running walks the graph
  * (`linearize`) into an ordered step list and simulates each step's output
- * against a worklist scope.
+ * against the whole portfolio.
  * ════════════════════════════════════════════════════════════════════════ */
 
 const newId = (p) => `${p}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
@@ -45,18 +45,6 @@ function linearize(nodes, edges) {
     current = nextEdge ? nodes.find((n) => n.id === nextEdge.target) : null;
   }
   return order.map((n) => ({ id: n.id, type: n.type, ...n.data }));
-}
-
-function sourceLabelFor(sourceStep, worklists) {
-  if (!sourceStep || !sourceStep.dataSource || sourceStep.dataSource === 'portfolio') return 'Whole portfolio';
-  return worklists.find((w) => w.id === sourceStep.dataSource)?.name || 'Worklist';
-}
-function rowsForSource(sourceStep, worklists) {
-  if (!sourceStep || !sourceStep.dataSource || sourceStep.dataSource === 'portfolio') return BORROWERS;
-  const wl = worklists.find((w) => w.id === sourceStep.dataSource);
-  if (!wl) return BORROWERS;
-  const set = new Set(wl.rowIds || []);
-  return BORROWERS.filter((b) => set.has(b._id));
 }
 
 /* ── deterministic mock "what the vendor/channel returned" ─────────────── */
@@ -158,7 +146,7 @@ function runPipeline(steps, rows) {
 
 /* ══════════════════════════════════════════════════════════ run — drawer */
 
-function StepResultBlock({ result, onExport, onSaveSegment }) {
+function StepResultBlock({ result, onExport, onCreateReport }) {
   if (result.step.type === 'sms' || result.step.type === 'whatsapp') {
     const { total, delivered, notDelivered, hasLink, linkClicked, linkNotClicked, template } = result;
     const icon = result.step.type === 'sms' ? '✉' : '📤';
@@ -171,11 +159,27 @@ function StepResultBlock({ result, onExport, onSaveSegment }) {
         </div>
         <div className="mt-2 space-y-1 text-[11px]">
           <div className="flex items-center justify-between"><span className="font-semibold text-emerald-600">Delivered</span><span>{fmt(delivered.length)} / {fmt(total)}</span></div>
-          <div className="flex items-center justify-between text-rose-500"><span className="font-semibold">Not delivered → retry</span><span>{fmt(notDelivered.length)}</span></div>
+          <div className="flex items-center justify-between text-rose-500">
+            <span className="font-semibold">Not delivered → retry</span>
+            <span className="flex items-center gap-2">
+              {fmt(notDelivered.length)}
+              <button className="font-semibold text-brand disabled:text-slate-300" disabled={notDelivered.length === 0} onClick={() => onCreateReport(label, 'Not delivered', notDelivered)}>
+                → Create report
+              </button>
+            </span>
+          </div>
           {hasLink && (
             <>
               <div className="flex items-center justify-between"><span className="font-semibold text-emerald-600">Link clicked</span><span>{fmt(linkClicked.length)}</span></div>
-              <div className="flex items-center justify-between text-rose-500"><span className="font-semibold">Link not clicked → retry</span><span>{fmt(linkNotClicked.length)}</span></div>
+              <div className="flex items-center justify-between text-rose-500">
+                <span className="font-semibold">Link not clicked → retry</span>
+                <span className="flex items-center gap-2">
+                  {fmt(linkNotClicked.length)}
+                  <button className="font-semibold text-brand disabled:text-slate-300" disabled={linkNotClicked.length === 0} onClick={() => onCreateReport(label, 'Link not clicked', linkNotClicked)}>
+                    → Create report
+                  </button>
+                </span>
+              </div>
             </>
           )}
         </div>
@@ -194,7 +198,14 @@ function StepResultBlock({ result, onExport, onSaveSegment }) {
           {counts.map(({ outcome, rows }) => (
             <div key={outcome.key} className={cx('flex items-center justify-between', outcome.key === 'answered' ? 'font-semibold text-emerald-600' : outcome.key === 'invalid' ? 'text-ink' : 'text-rose-500')}>
               <span className="font-semibold">{outcome.label}{outcome.key !== 'answered' && outcome.key !== 'invalid' ? ' → retry' : ''}</span>
-              <span>{fmt(rows.length)} / {fmt(total)}</span>
+              <span className="flex items-center gap-2">
+                {fmt(rows.length)} / {fmt(total)}
+                {outcome.key !== 'answered' && (
+                  <button className="font-semibold text-brand disabled:text-slate-300" disabled={rows.length === 0} onClick={() => onCreateReport('Automated Call (IVR)', outcome.label, rows)}>
+                    → Create report
+                  </button>
+                )}
+              </span>
             </div>
           ))}
         </div>
@@ -248,7 +259,9 @@ function StepResultBlock({ result, onExport, onSaveSegment }) {
               <span className="text-[12px] font-semibold">{segment.name}</span>
               <span className="ml-2 text-[11px] text-muted">{fmt(rows.length)} borrowers</span>
             </div>
-            <button className="text-[10.5px] font-semibold text-brand disabled:text-slate-300" disabled={rows.length === 0} onClick={() => onSaveSegment(segment, rows)}>Save as worklist</button>
+            <div className="flex items-center gap-3">
+              <button className="text-[10.5px] font-semibold text-brand disabled:text-slate-300" disabled={rows.length === 0} onClick={() => onCreateReport('Segmentation', segment.name, rows)}>→ Create report</button>
+            </div>
           </div>
         ))}
         <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-muted">
@@ -261,7 +274,7 @@ function StepResultBlock({ result, onExport, onSaveSegment }) {
 }
 
 function useRunResultActions(pipelineName) {
-  const { showToast, addWorklist } = useUI();
+  const { showToast, addReport } = useUI();
   function exportStep(result) {
     const headers = ['Borrower', 'Ref ID', 'Mobile', ...result.action.fields.map((f) => f.label)];
     const rows = result.perBorrower.map(({ borrower, values }) => [
@@ -274,29 +287,74 @@ function useRunResultActions(pipelineName) {
     ]);
     exportCsv(`${pipelineName.replace(/\s+/g, '_').toLowerCase()}_${result.action.key}.csv`, headers, rows);
   }
-  function saveSegment(segment, rows) {
-    addWorklist({
-      id: newId('wl'),
-      name: `${pipelineName} — ${segment.name}`,
-      count: rows.length,
-      criteria: segment.conditions.map((c) => `condition ${OP_LABEL[c.op] || c.op} ${c.value}`),
+  // Pulls the borrowers who reached a given outcome partway through this run
+  // out into a Report — a snapshot to hand off and work by hand (a field
+  // visit, a tele-calling list), tracked on its own page under "Reports".
+  function createReport(stepLabel, outcomeLabel, rows) {
+    const assignments = {};
+    rows.forEach((b) => (assignments[b._id] = { assignee: null, status: 'pending', remark: '' }));
+    addReport({
+      id: newId('rpt'),
+      name: `${pipelineName} — ${outcomeLabel}`,
+      purpose: `${outcomeLabel} on the ${stepLabel} step — needs manual follow-up.`,
+      source: { pipelineName, step: stepLabel, outcome: outcomeLabel },
+      createdAt: new Date().toISOString(),
+      generatedBy: CURRENT_USER.name,
+      status: 'open',
       rowIds: rows.map((b) => b._id),
+      assignments,
     });
-    showToast(`Saved “${segment.name}” as a worklist (${fmt(rows.length)} borrowers)`, 'success');
+    showToast(`Report “${outcomeLabel}” created — ${fmt(rows.length)} borrowers. See Reports.`, 'success');
   }
-  return { exportStep, saveSegment };
+  return { exportStep, createReport };
 }
 
-function PipelineRunDrawer({ pipeline, onClose, onRunStart, onRunComplete }) {
-  const { worklists } = useUI();
-  const { exportStep, saveSegment } = useRunResultActions(pipeline.name);
+// Run dialog — pick the population, kick the run off, then get out of the
+// way: it closes itself once the run lands, and the result lives only in
+// History from there (see "View analytics").
+// Which borrowers reached a given node? Walks the incoming edges back to the
+// source, narrowing by each branch handle it came out of.
+function borrowersReaching(nodeId, pipeline, results, rows, seen = new Set()) {
+  if (seen.has(nodeId)) return [];
+  seen.add(nodeId);
+  const node = pipeline.nodes.find((n) => n.id === nodeId);
+  if (!node || node.type === 'source') return rows;
+  const byId = new Set();
+  pipeline.edges.filter((e) => e.target === nodeId).forEach((e) => {
+    const src = pipeline.nodes.find((n) => n.id === e.source);
+    if (!src) return;
+    let base = borrowersReaching(src.id, pipeline, results, rows, seen);
+    const h = e.sourceHandle;
+    const res = results.find((r) => r.step.id === src.id);
+    let picked = base;
+    if (res && (src.type === 'sms' || src.type === 'whatsapp')) {
+      picked = h === 'delivered' ? res.delivered : h === 'not_delivered' ? res.notDelivered : base;
+    } else if (res && src.type === 'ivr') {
+      picked = res.counts.find((c) => c.outcome.key === h)?.rows ?? base;
+    } else if (src.type === 'delivered') {
+      const feeder = pipeline.edges.find((x) => x.target === src.id && x.sourceHandle === 'delivered');
+      const fres = feeder && results.find((r) => r.step.id === feeder.source);
+      if (fres) picked = h === 'link_clicked' ? fres.linkClicked : h === 'link_not_clicked' ? fres.linkNotClicked : base;
+    } else if (src.type === 'call_answered' && h) {
+      picked = base.filter((b) => simulateFieldValue(b, { key: 'ivrChoice' }) === h);
+    }
+    const ids = new Set(base.map((b) => b._id));
+    picked.filter((b) => ids.has(b._id)).forEach((b) => byId.add(b._id));
+  });
+  return rows.filter((b) => byId.has(b._id));
+}
+
+function RunWorkflowDialog({ pipeline, onClose, onRunStart, onRunComplete }) {
+  const { worklists, addReport, showToast } = useUI();
   const allSteps = linearize(pipeline.nodes, pipeline.edges);
-  const sourceStep = allSteps.find((s) => s.type === 'source');
   const steps = allSteps.filter((s) => s.type !== 'source');
-  const rows = useMemo(() => rowsForSource(sourceStep, worklists), [sourceStep, worklists]);
-  const [phase, setPhase] = useState('idle'); // idle | running | done
+  const [source, setSource] = useState('portfolio'); // 'portfolio' | worklist id
+  const selectedWorklist = source === 'portfolio' ? null : worklists.find((w) => w.id === source) || null;
+  const rows = selectedWorklist
+    ? BORROWERS.filter((b) => new Set(selectedWorklist.rowIds).has(b._id))
+    : BORROWERS;
+  const [phase, setPhase] = useState('idle'); // idle | running
   const [progress, setProgress] = useState(0);
-  const [results, setResults] = useState([]);
 
   function run() {
     if (phase === 'running' || rows.length === 0) return;
@@ -310,48 +368,58 @@ function PipelineRunDrawer({ pipeline, onClose, onRunStart, onRunComplete }) {
       setProgress(Math.min(100, p));
       if (p < 100) setTimeout(tick, 300);
       else {
-        const nextResults = runPipeline(steps, rows);
-        setResults(nextResults);
-        setPhase('done');
-        onRunComplete?.({ runId, results: nextResults, borrowers: rows.length });
+        const results = runPipeline(steps, rows);
+        pipeline.nodes.filter((n) => n.type === 'report').forEach((n) => {
+          const reached = borrowersReaching(n.id, pipeline, results, rows);
+          const name = n.data.reportName?.trim() || `${pipeline.name} — Report`;
+          const assignments = {};
+          reached.forEach((b) => (assignments[b._id] = { assignee: null, status: 'pending', remark: '' }));
+          addReport({
+            id: newId('rpt'),
+            name,
+            purpose: n.data.reportDescription?.trim() || `Borrowers who reached the “${name}” step of ${pipeline.name}.`,
+            source: { pipelineName: pipeline.name, step: 'Generate report', outcome: name },
+            createdAt: new Date().toISOString(),
+            generatedBy: CURRENT_USER.name,
+            status: 'open',
+            rowIds: reached.map((b) => b._id),
+            assignments,
+          });
+          showToast(`Report “${name}” created — ${fmt(reached.length)} borrowers. See Reports.`, 'success');
+        });
+        onRunComplete?.({ runId, results, borrowers: rows.length });
       }
     };
     tick();
   }
 
   return (
-    <Drawer open onClose={onClose} width="lg">
-      <DrawerHeader title={`Run — ${pipeline.name}`} subtitle={`${steps.length} steps, in order`} onClose={onClose} />
-      <div className="p-6">
-        <Card pad className="mb-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Data source</span>
-            <Tag variant="amber">📂 {sourceLabelFor(sourceStep, worklists)}</Tag>
-            <span className="text-[11px] text-muted">{fmt(rows.length)} borrowers — set on the workflow itself, edit it there</span>
-          </div>
-        </Card>
+    <Modal open onClose={onClose} size="md">
+      <ModalHeader title={`Run — ${pipeline.name}`} subtitle={`${steps.length} steps, in order`} onClose={onClose} />
 
-        {phase !== 'done' && (
-          <Button variant="primary" className="w-full" disabled={phase === 'running' || rows.length === 0} onClick={run}>
-            {phase === 'running' ? 'Running workflow…' : `Run on ${fmt(rows.length)} borrowers`}
-          </Button>
-        )}
-        {phase === 'running' && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
-            <i className="block h-full bg-gradient-to-r from-brand to-emerald-500 transition-all" style={{ width: progress + '%' }} />
-          </div>
-        )}
-
-        {phase === 'done' && (
-          <div className="mt-4 space-y-2.5">
-            {results.map((r) => (
-              <StepResultBlock key={r.step.id} result={r} onExport={exportStep} onSaveSegment={saveSegment} />
+      <Card pad className="mb-4">
+        <Field label="Data source" className="mb-0">
+          <Select value={source} disabled={phase === 'running'} onChange={(e) => setSource(e.target.value)}>
+            <option value="portfolio">📂 Whole portfolio</option>
+            {worklists.map((w) => (
+              <option key={w.id} value={w.id}>
+                ⊞ {w.name} ({fmt(w.count)})
+              </option>
             ))}
-            <button className="text-[11px] font-semibold text-brand" onClick={() => setPhase('idle')}>run again</button>
-          </div>
-        )}
-      </div>
-    </Drawer>
+          </Select>
+        </Field>
+        <div className="mt-2 text-[11px] text-muted">{fmt(rows.length)} borrowers in this run</div>
+      </Card>
+
+      <Button variant="primary" className="w-full" disabled={phase === 'running' || rows.length === 0} onClick={run}>
+        {phase === 'running' ? 'Running workflow…' : `Run on ${fmt(rows.length)} borrowers`}
+      </Button>
+      {phase === 'running' && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
+          <i className="block h-full bg-gradient-to-r from-brand to-emerald-500 transition-all" style={{ width: progress + '%' }} />
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -431,6 +499,7 @@ function buildChannelAnalytics(seedKey, borrowers) {
 
 const CHANNEL_TABS = [
   ['overview', 'Overview'],
+  ['steps', 'Step results'],
   ['sms', 'SMS'],
   ['whatsapp', 'WhatsApp'],
   ['ivr', 'IVR'],
@@ -543,6 +612,7 @@ function DonutChart({ segments, total, totalLabel, size = 128, thickness = 18 })
 }
 
 function RunAnalyticsPage({ run, onBack }) {
+  const { exportStep, createReport } = useRunResultActions(run.pipelineName);
   const [ctab, setCtab] = useState('overview');
   const a = run.channelAnalytics;
   const reachedPct = run.borrowers ? Math.round((a.journey[1].borrowers / run.borrowers) * 100) : 0;
@@ -597,6 +667,14 @@ function RunAnalyticsPage({ run, onBack }) {
             />
           </Card>
         </>
+      )}
+
+      {ctab === 'steps' && (
+        <div className="space-y-2.5">
+          {(run.results || []).map((r) => (
+            <StepResultBlock key={r.step.id} result={r} onExport={exportStep} onCreateReport={createReport} />
+          ))}
+        </div>
       )}
 
       {ctab === 'sms' && (
@@ -713,49 +791,31 @@ function HistoryTab({ runs, onView }) {
 
 /* ═══════════════════════════════════════════════════════════════ main page */
 
-function stepChip(s) {
-  if (s.type === 'action') {
-    const a = PIPELINE_ACTION_BY_KEY[s.action];
-    return { icon: a.icon, label: a.label, variant: undefined };
-  }
-  if (s.type === 'sms') return { icon: '✉', label: 'SMS', variant: undefined };
-  if (s.type === 'whatsapp') return { icon: '📤', label: 'WhatsApp', variant: undefined };
-  if (s.type === 'delivered') return { icon: '✓', label: 'Message delivered', variant: 'green' };
-  if (s.type === 'ivr') return { icon: '☎', label: 'Automated Call', variant: undefined };
-  if (s.type === 'call_answered') return { icon: '✓', label: 'Call answered', variant: 'green' };
-  if (s.type === 'retry') return { icon: '🔁', label: 'Retry', variant: 'amber' };
-  return { icon: '◆', label: `Segment${s.segments?.length ? ` (${s.segments.length})` : ''}`, variant: 'blue' };
-}
-
-function PipelineCard({ pipeline, onEdit, onRun, onDelete }) {
-  const { worklists } = useUI();
-  const allSteps = linearize(pipeline.nodes, pipeline.edges);
-  const sourceStep = allSteps.find((s) => s.type === 'source');
-  const steps = allSteps.filter((s) => s.type !== 'source');
+function WorkflowsTable({ pipelines, onEdit, onRun }) {
   return (
-    <Card pad>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <b className="text-[13.5px]">{pipeline.name}</b>
-          <div className="mt-0.5 text-[10.5px] text-muted">{steps.length} step{steps.length === 1 ? '' : 's'}</div>
-        </div>
-        <button className="text-[10.5px] font-semibold text-muted hover:text-danger" onClick={onDelete}>delete</button>
-      </div>
-      <div className="mt-2.5 flex flex-wrap items-center gap-1">
-        <Tag variant="amber">📂 {sourceLabelFor(sourceStep, worklists)}</Tag>
-        {steps.map((s, i) => {
-          const c = stepChip(s);
-          return (
-            <React.Fragment key={s.id}>
-              <span className="text-[10px] text-muted">→</span>
-              <Tag variant={c.variant}>{c.icon} {c.label}</Tag>
-            </React.Fragment>
-          );
-        })}
-      </div>
-      <div className="mt-3 flex gap-2">
-        <Button size="xs" onClick={onEdit}>Edit</Button>
-        <Button size="xs" variant="primary" onClick={onRun}>Run</Button>
+    <Card pad className="content-start">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-wide text-muted">
+              <th className="py-2 pr-3">Workflow</th>
+              <th className="py-2 pr-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {pipelines.map((p) => (
+              <tr key={p.id} className="border-b border-line/60">
+                <td className="py-2.5 pr-3 font-semibold">{p.name}</td>
+                <td className="py-2.5 pr-3">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button size="xs" onClick={() => onEdit(p)}>✎ Edit</Button>
+                    <Button size="xs" variant="primary" onClick={() => onRun(p)}>▶ Run</Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </Card>
   );
@@ -767,18 +827,17 @@ function PipelineCard({ pipeline, onEdit, onRun, onDelete }) {
 function buildSeedRuns(pipelines) {
   const byName = (name) => pipelines.find((p) => p.name === name);
   const seeds = [
-    { pipeline: byName('Contact-first, enrich the unreachable'), startedAt: '2026-09-15T08:50:00Z', status: 'running' },
-    { pipeline: byName('Bureau-first collection sweep'), startedAt: '2026-09-14T09:30:00Z', finishedAt: '2026-09-14T09:34:00Z', status: 'completed' },
-    { pipeline: byName('Contact-first, enrich the unreachable'), startedAt: '2026-09-13T14:05:00Z', finishedAt: '2026-09-13T14:12:00Z', status: 'completed' },
-    { pipeline: byName('Bureau-first collection sweep'), startedAt: '2026-09-10T11:00:00Z', finishedAt: '2026-09-10T11:05:00Z', status: 'completed' },
+    { pipeline: byName('High Ability, High Intent Borrowers (Saralya Suggested)'), startedAt: '2026-09-15T08:50:00Z', status: 'running' },
+    { pipeline: byName('High Ability, Low Intent Borrowers (Saralya Suggested)'), startedAt: '2026-09-14T09:30:00Z', finishedAt: '2026-09-14T09:34:00Z', status: 'completed' },
+    { pipeline: byName('High Ability, High Intent Borrowers (Saralya Suggested)'), startedAt: '2026-09-13T14:05:00Z', finishedAt: '2026-09-13T14:12:00Z', status: 'completed' },
+    { pipeline: byName('High Ability, Low Intent Borrowers (Saralya Suggested)'), startedAt: '2026-09-10T11:00:00Z', finishedAt: '2026-09-10T11:05:00Z', status: 'completed' },
   ];
   return seeds
     .filter((s) => s.pipeline)
     .map((s, i) => {
       const allSteps = linearize(s.pipeline.nodes, s.pipeline.edges);
-      const sourceStep = allSteps.find((n) => n.type === 'source');
       const steps = allSteps.filter((n) => n.type !== 'source');
-      const rows = rowsForSource(sourceStep, []);
+      const rows = BORROWERS;
       const id = `run_seed_${i}`;
       return {
         id,
@@ -795,7 +854,7 @@ function buildSeedRuns(pipelines) {
 }
 
 export default function PipelinesPage() {
-  const { pipelines, openPipelineBuilder, removePipeline } = useUI();
+  const { pipelines, openPipelineBuilder, showToast } = useUI();
   const [tab, setTab] = useState('workflows');
   const [runningPipeline, setRunningPipeline] = useState(null);
   const [runs, setRuns] = useState(() => buildSeedRuns(pipelines));
@@ -812,6 +871,11 @@ export default function PipelinesPage() {
           : r
       )
     );
+    // The run dialog's only job was to kick this off — the outcome now lives
+    // in History, not inline in the dialog.
+    setRunningPipeline(null);
+    setTab('history');
+    showToast(`Workflow run completed — ${fmt(borrowers)} borrowers. See History.`, 'success');
   }
 
   if (viewingRun) {
@@ -848,18 +912,14 @@ export default function PipelinesPage() {
         pipelines.length === 0 ? (
           <Empty>No workflows yet — compose one from the 7 action steps + manual segmentation.</Empty>
         ) : (
-          <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-            {pipelines.map((p) => (
-              <PipelineCard key={p.id} pipeline={p} onEdit={() => openPipelineBuilder(p)} onRun={() => setRunningPipeline(p)} onDelete={() => removePipeline(p.id)} />
-            ))}
-          </div>
+          <WorkflowsTable pipelines={pipelines} onEdit={openPipelineBuilder} onRun={setRunningPipeline} />
         )
       ) : (
         <HistoryTab runs={runs} onView={setViewingRun} />
       )}
 
       {runningPipeline && (
-        <PipelineRunDrawer
+        <RunWorkflowDialog
           pipeline={runningPipeline}
           onClose={() => setRunningPipeline(null)}
           onRunStart={handleRunStart}

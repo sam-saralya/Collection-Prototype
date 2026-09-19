@@ -11,6 +11,13 @@ const NEW_ROLES = [
   ['org_manager', 'Org Manager — views reports only'],
 ];
 
+function generatePassword(length = 12) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+  const buf = new Uint32Array(length);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (n) => chars[n % chars.length]).join('');
+}
+
 function AddMemberForm({ onAdded }) {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'org_user' });
   const [err, setErr] = useState(null);
@@ -46,7 +53,12 @@ function AddMemberForm({ onAdded }) {
           </Select>
         </Field>
         <Field label="Initial password" required hint={`At least ${MIN_PASSWORD} characters. Shown once — pass it on yourself.`}>
-          <Input type="text" autoComplete="off" value={form.password} onChange={set('password')} />
+          <div className="flex gap-2">
+            <Input type="text" autoComplete="off" value={form.password} onChange={set('password')} />
+            <Button type="button" onClick={() => setForm((f) => ({ ...f, password: generatePassword() }))}>
+              Generate
+            </Button>
+          </div>
         </Field>
       </div>
       <div>

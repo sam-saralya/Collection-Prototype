@@ -2,14 +2,17 @@ import React from 'react';
 import StaffShell from '../components/StaffShell.jsx';
 import { StaffProvider, useStaff } from './staff/store.jsx';
 import OrganizationsPage from './staff/OrganizationsPage.jsx';
+import OrganizationDetailPage from './staff/OrganizationDetailPage.jsx';
 import OnboardOrgPage from './staff/OnboardOrgPage.jsx';
 import PricingPage from './staff/PricingPage.jsx';
 import IvrConfigPage from './staff/IvrConfigPage.jsx';
 import WhatsAppMetaPage from './staff/WhatsAppMetaPage.jsx';
+import QuadrantRulesCard from '../components/QuadrantRulesCard.jsx';
 import { ComingSoon } from './staff/shared.jsx';
 
 function Section() {
-  const { section } = useStaff();
+  const { section, viewOrgId } = useStaff();
+  if (viewOrgId) return <OrganizationDetailPage />;
   switch (section) {
     case 'organizations':
       return <OrganizationsPage />;
@@ -21,11 +24,13 @@ function Section() {
       return <IvrConfigPage />;
     case 'whatsapp':
       return <WhatsAppMetaPage />;
+    case 'quadrantRules':
+      return <QuadrantRulesCard />;
     case 'audit':
       return (
         <ComingSoon title="Audit log is on the way">
           A filterable timeline of who did what, when, and against which tenant — including the break-glass password
-          reveals from the Organizations page.
+          reveals from the Tenant page.
         </ComingSoon>
       );
     case 'health':
